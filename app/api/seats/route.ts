@@ -1,12 +1,12 @@
 import { NextResponse } from 'next/server';
-import { getSeatsSummary, seatStore } from '@/lib/seatStore';
+import { getSeatsSummary } from '@/lib/seatStore';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET() {
-  const seats = getSeatsSummary();
+  const seats = await getSeatsSummary();
   return NextResponse.json({
     seats,
-    lastUpdated: seatStore.lastUpdated
+    timestamp: Date.now()
   });
 }

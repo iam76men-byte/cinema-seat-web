@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { verifyAndDecryptTicket, TICKET_LIFETIME_MS } from '@/lib/crypto';
-import { seatStore, purgeExpiredSeats } from '@/lib/seatStore';
+import { verifyAndDecryptTicket } from '@/lib/crypto';
+import { getSeatsSummary, verifySeat, releaseSeats } from '@/lib/seatStore';
 
 export const dynamic = 'force-dynamic';
 
@@ -22,10 +22,8 @@ export async function POST(req: NextRequest) {
   }
 }
 
-function handleVerify(seatId: string | null, token: string | null, code: string | null) {
-  purgeExpiredSeats();
-
-  if (!seatId || !seatStore.seats[seatId]) {
+async function handleVerify(seatId: string | null, token: string | null, code: string | null) {
+  if (!seatId || !['A1', 'A2', 'B1', 'B2'].includes(seatId)) {
     return NextResponse.json({ success: false, message: '존재하지 않는 좌석입니다.' }, { status: 404 });
   }
 
@@ -33,22 +31,17 @@ function handleVerify(seatId: string | null, token: string | null, code: string 
     return NextResponse.json({ success: false, message: '토큰 또는 좌석 코드가 누락되었습니다.' }, { status: 400 });
   }
 
-  const seat = seatStore.seats[seatId];
-
   // 1. AES-256-GCM 복호화 및 위변조/만료 검증
   const decrypted = verifyAndDecryptTicket(token);
   if (!decrypted.valid) {
     if (decrypted.expired) {
-      seat.status = 0;
-      seat.token = null;
-      seat.buyer = null;
-      seatStore.lastUpdated = Date.now();
+      await releaseSeats(seatId);
       return NextResponse.json({ success: false, message: decrypted.error }, { status: 410 });
     }
     return NextResponse.json({ success: false, message: `보안 검증 실패: ${decrypted.error}` }, { status: 403 });
   }
 
-  // 2. 좌석 번호 일치 검증
+  // 2. 좌석 일치 검증
   if (decrypted.payload?.seatId !== seatId) {
     return NextResponse.json({ success: false, message: '티켓의 좌석 정보가 일치하지 않습니다.' }, { status: 403 });
   }
@@ -62,15 +55,12 @@ function handleVerify(seatId: string | null, token: string | null, code: string 
     }, { status: 400 });
   }
 
-  // 검증 성공 -> 점유(2, LED ON) 상태 전환
-  seat.status = 2;
-  seat.timerStart = Date.now();
-  seat.durationMs = TICKET_LIFETIME_MS;
-  seatStore.lastUpdated = Date.now();
+  // 검증 성공 -> Supabase DB에 점유(2, LED ON) 상태 영구 기록
+  await verifySeat(seatId);
 
   return NextResponse.json({
     success: true,
-    seatId: seat.id,
+    seatId: seatId,
     buyer: decrypted.payload?.buyer,
     message: `[${seatId} 좌석] ${decrypted.payload?.buyer.name} 님 인증 완료! 좌석 잠금이 해제되었습니다.`
   });

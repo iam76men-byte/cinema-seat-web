@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createEncryptedTicket, TICKET_LIFETIME_MS } from '@/lib/crypto';
-import { seatStore, purgeExpiredSeats } from '@/lib/seatStore';
+import { createEncryptedTicket } from '@/lib/crypto';
+import { getSeatsSummary, reserveSeat } from '@/lib/seatStore';
 
 export const dynamic = 'force-dynamic';
 
@@ -22,30 +22,26 @@ export async function POST(req: NextRequest) {
   }
 }
 
-function handleReserve(seatId: string | null, name: string, phone: string) {
-  purgeExpiredSeats();
-
-  if (!seatId || !seatStore.seats[seatId]) {
+async function handleReserve(seatId: string | null, name: string, phone: string) {
+  if (!seatId || !['A1', 'A2', 'B1', 'B2'].includes(seatId)) {
     return NextResponse.json({ success: false, message: '존재하지 않는 좌석입니다.' }, { status: 404 });
   }
 
-  const seat = seatStore.seats[seatId];
-  if (seat.status !== 0) {
+  const seats = await getSeatsSummary();
+  const currentSeat = seats.find(s => s.id === seatId);
+
+  if (currentSeat && currentSeat.status !== 0) {
     return NextResponse.json({ success: false, message: '이미 예매되었거나 사용 중인 좌석입니다.' }, { status: 409 });
   }
 
   const { token, payload } = createEncryptedTicket(seatId, { name, phone });
 
-  seat.status = 1; // 5분 인증 대기
-  seat.token = token;
-  seat.buyer = payload.buyer;
-  seat.timerStart = Date.now();
-  seat.durationMs = TICKET_LIFETIME_MS;
-  seatStore.lastUpdated = Date.now();
+  // Supabase DB에 예매 상태 영구 기록
+  await reserveSeat(seatId, token, payload.buyer);
 
   return NextResponse.json({
     success: true,
-    seatId: seat.id,
+    seatId: seatId,
     token: token,
     ticketId: payload.ticketId,
     buyer: {
