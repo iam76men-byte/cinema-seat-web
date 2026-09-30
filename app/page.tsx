@@ -37,6 +37,7 @@ export default function CinemaSeatPage() {
   // Modals
   const [isScannerOpen, setIsScannerOpen] = useState(false);
   const [isQrListOpen, setIsQrListOpen] = useState(false);
+  const [activeQrSeat, setActiveQrSeat] = useState<'A1' | 'A2' | 'B1' | 'B2'>('A1');
   const [scannerStatus, setScannerStatus] = useState('카메라 준비 중...');
 
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -398,23 +399,58 @@ export default function CinemaSeatPage() {
         </div>
       </div>
 
-      {/* Modal 2: QR Codes List */}
+      {/* Modal 2: QR Codes List (Large View with Tabs) */}
       <div className={`modal-overlay ${isQrListOpen ? 'open' : ''}`}>
         <div className="modal-box">
-          <div className="modal-title">🖨️ 현장 좌석 QR 코드</div>
+          <div className="modal-title">🖨️ 현장 좌석 부착용 대형 QR 코드</div>
           <p style={{ fontSize: 12, color: 'var(--subtext)' }}>
-            다른 기기에 띄워 카메라로 비추거나 [직접 인증] 버튼을 누르세요.
+            스마트폰 카메라로 멀리서도 쉽게 스캔할 수 있도록 확대되었습니다.
           </p>
-          <div className="qr-grid">
-            {['A1', 'A2', 'B1', 'B2'].map(seatId => (
-              <div key={seatId} className="qr-item">
-                <span>좌석 {seatId}</span>
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={`https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=SEAT:${seatId}`} alt={`QR ${seatId}`} />
-                <button onClick={() => handleDirectVerify(seatId)}>직접 인증</button>
-              </div>
+
+          {/* Seat Tab Switcher */}
+          <div className="qr-tabs">
+            {(['A1', 'A2', 'B1', 'B2'] as const).map(seatId => (
+              <button
+                key={seatId}
+                className={`qr-tab-btn ${activeQrSeat === seatId ? 'active' : ''}`}
+                onClick={() => setActiveQrSeat(seatId)}
+              >
+                좌석 {seatId}
+              </button>
             ))}
           </div>
+
+          {/* Active Large QR Card */}
+          <div className="qr-single-card">
+            <span style={{ fontSize: 18, fontWeight: 800, color: 'var(--accent-cyan)' }}>
+              좌석 [{activeQrSeat}] 부착용 QR
+            </span>
+
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={`https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=SEAT:${activeQrSeat}`}
+              alt={`대형 QR ${activeQrSeat}`}
+            />
+
+            <div style={{ textAlign: 'center' }}>
+              <div style={{ fontSize: 11, color: 'var(--subtext)', marginBottom: 4 }}>
+                QR 코드 내장 텍스트 데이터:
+              </div>
+              <div className="qr-code-data-badge">
+                SEAT:{activeQrSeat}
+              </div>
+            </div>
+
+            <div className="qr-btn-group">
+              <button
+                className="btn-action btn-scan"
+                onClick={() => handleDirectVerify(activeQrSeat)}
+              >
+                ⚡ 지금 바로 인증 테스트
+              </button>
+            </div>
+          </div>
+
           <button className="btn-secondary" onClick={() => setIsQrListOpen(false)} style={{ marginTop: 14 }}>
             닫기
           </button>
