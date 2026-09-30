@@ -580,7 +580,7 @@ export default function CinemaSeatPage() {
                   <span className="seat-num">{s.id}</span>
                   <span className="seat-tag" style={{ fontWeight: 700 }}>{badgeText}</span>
                   {subText && (
-                    <span style={{ fontSize: '10px', marginTop: '2px', opacity: 0.9 }}>
+                    <span style={{ fontSize: '8px', marginTop: '1px', opacity: 0.9, lineHeight: 1 }}>
                       {subText}
                     </span>
                   )}
