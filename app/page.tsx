@@ -441,43 +441,67 @@ export default function CinemaSeatPage() {
           <div className="seat-grid">
             {nextSeats.map((s) => {
               const isSelected = selectedSeat === s.id;
-              const isBooked = s.status !== 0;
+              const isMySeat = myTicket?.seatId === s.id;
 
               let btnClass = 'seat-btn status-empty';
-              let statusLabel = '예매가능';
+              let badgeText = '예매 가능';
+              let subText = '';
 
-              if (isBooked) {
+              if (s.status === 2) {
+                // 🟢 착석 완료 (현장 QR 인증 완료 & 점유 상태)
+                btnClass = 'seat-btn status-occupied';
+                badgeText = isMySeat ? '내 좌석 (착석)' : (s.buyerName ? `${s.buyerName} 착석` : '착석 완료');
+                subText = '🟢 착석 (LED ON)';
+              } else if (s.status === 1) {
+                // 🟡 예약 대기 (0원 예매 완료, 아직 현장 QR 미인증)
                 btnClass = 'seat-btn status-reserved';
-                statusLabel = s.buyerName ? `${s.buyerName} 예약` : '예약완료';
+                badgeText = isMySeat ? '내 예약 (대기)' : (s.buyerName ? `${s.buyerName} 예약` : '예약 완료');
+                subText = '🟡 입장 대기';
               } else if (isSelected) {
                 btnClass = 'seat-btn status-empty selected';
-                statusLabel = '선택됨';
+                badgeText = '선택됨';
+                subText = '예매 진행 중';
               }
+
+              const isClickable = s.status === 0;
 
               return (
                 <button
                   key={s.id}
                   className={btnClass}
                   onClick={() => handleSelectSeat(s.id)}
-                  disabled={isBooked}
+                  disabled={!isClickable}
+                  style={{
+                    position: 'relative',
+                    borderWidth: isMySeat ? '2px' : undefined,
+                    boxShadow: isMySeat ? '0 0 16px rgba(245, 158, 11, 0.5)' : undefined
+                  }}
                 >
                   <span className="seat-num">{s.id}</span>
-                  <span className="seat-tag">{statusLabel}</span>
+                  <span className="seat-tag" style={{ fontWeight: 700 }}>{badgeText}</span>
+                  {subText && (
+                    <span style={{ fontSize: '10px', marginTop: '2px', opacity: 0.9 }}>
+                      {subText}
+                    </span>
+                  )}
                 </button>
               );
             })}
           </div>
 
           {/* Seat Status Legend */}
-          <div className="seat-legend">
+          <div className="seat-legend" style={{ flexWrap: 'wrap', gap: '12px' }}>
             <div className="legend-item">
               <span className="legend-color empty"></span> 빈좌석
             </div>
             <div className="legend-item">
-              <span className="legend-color selected"></span> 내 선택
+              <span className="legend-color reserved"></span> 예약 대기 (미착석)
             </div>
             <div className="legend-item">
-              <span className="legend-color reserved"></span> 예약됨
+              <span className="legend-color occupied"></span> 착석 완료 (LED ON)
+            </div>
+            <div className="legend-item">
+              <span className="legend-color selected"></span> 내 선택
             </div>
           </div>
         </div>
@@ -532,8 +556,20 @@ export default function CinemaSeatPage() {
             })}
           </div>
 
+          <div className="seat-legend" style={{ flexWrap: 'wrap', gap: '12px', marginTop: '16px' }}>
+            <div className="legend-item">
+              <span className="legend-color empty"></span> 빈좌석 (소등)
+            </div>
+            <div className="legend-item">
+              <span className="legend-color reserved"></span> 입장 대기
+            </div>
+            <div className="legend-item">
+              <span className="legend-color occupied"></span> 착석 관람 중 (LED ON)
+            </div>
+          </div>
+
           <div style={{
-            marginTop: '16px',
+            marginTop: '12px',
             padding: '10px 14px',
             background: 'rgba(16, 185, 129, 0.1)',
             borderRadius: '10px',
@@ -574,48 +610,81 @@ export default function CinemaSeatPage() {
       )}
 
       {/* My Ticket View (내 티켓 카드) */}
-      {myTicket && (
-        <div className="ticket-card">
-          <div className="ticket-header">
-            <span className="ticket-badge">✨ [{myTicket.sessionLabel}] 모바일 티켓</span>
-            <span className="security-badge" title="브라우저를 닫았다 열어도 상영 종료 시까지 유지됩니다">
-              💾 저장됨 · 🔐 AES-256
-            </span>
-          </div>
+      {myTicket && (() => {
+        const mySeatObj = nextSeats.find(s => s.id === myTicket.seatId) || currentSeats.find(s => s.id === myTicket.seatId);
+        const isSeated = mySeatObj?.status === 2;
 
-          <div className="ticket-buyer-row">
-            <div><b>예매자:</b> {myTicket.buyer.name}</div>
-            <div><b>연락처:</b> {myTicket.buyer.phoneMasked}</div>
-          </div>
-
-          <div className="ticket-body">
-            <div className="ticket-seat-box">
-              <div className="lbl">내 예매 좌석</div>
-              <div className="val">{myTicket.seatId}</div>
+        return (
+          <div className="ticket-card">
+            <div className="ticket-header">
+              <span className="ticket-badge">✨ [{myTicket.sessionLabel}] 모바일 티켓</span>
+              <span className="security-badge" title="브라우저를 닫았다 열어도 상영 종료 시까지 유지됩니다">
+                💾 저장됨 · 🔐 AES-256
+              </span>
             </div>
-            <div className="ticket-time-box">
-              <div className="countdown-timer">{ticketCountdown}</div>
-              <div className="countdown-lbl">회차 종료 시 일괄 자동 소멸</div>
-            </div>
-          </div>
 
-          <button className="btn-action btn-scan" onClick={openScanner}>
-            📷 좌석 QR 찍고 잠금 풀기 / 입장 확인
-          </button>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
-            <button className="btn-secondary" onClick={() => setIsQrListOpen(true)}>
-              🖨️ QR 코드 보기
-            </button>
+            {/* 착석 여부 실시간 상태 뱃지 */}
+            <div style={{
+              margin: '10px 0 4px',
+              padding: '8px 12px',
+              borderRadius: '10px',
+              background: isSeated ? 'rgba(16, 185, 129, 0.15)' : 'rgba(245, 158, 11, 0.15)',
+              border: isSeated ? '1px solid rgba(16, 185, 129, 0.4)' : '1px solid rgba(245, 158, 11, 0.4)',
+              color: isSeated ? '#10b981' : '#f59e0b',
+              fontSize: '12px',
+              fontWeight: 700,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between'
+            }}>
+              <span>
+                {isSeated ? '🟢 현장 좌석 착석 완료 (LED 점등)' : '🟡 예약 대기 중 (현장 QR 미인증)'}
+              </span>
+              <span style={{ fontSize: '11px', opacity: 0.8 }}>
+                {isSeated ? '잠금 해제됨' : '좌석 QR을 찍어주세요'}
+              </span>
+            </div>
+
+            <div className="ticket-buyer-row">
+              <div><b>예매자:</b> {myTicket.buyer.name}</div>
+              <div><b>연락처:</b> {myTicket.buyer.phoneMasked}</div>
+            </div>
+
+            <div className="ticket-body">
+              <div className="ticket-seat-box">
+                <div className="lbl">내 예매 좌석</div>
+                <div className="val">{myTicket.seatId}</div>
+              </div>
+              <div className="ticket-time-box">
+                <div className="countdown-timer">{ticketCountdown}</div>
+                <div className="countdown-lbl">회차 종료 시 일괄 자동 소멸</div>
+              </div>
+            </div>
+
             <button
-              className="btn-secondary"
-              onClick={handleCancelTicket}
-              style={{ color: '#ef4444', borderColor: 'rgba(239, 68, 68, 0.4)' }}
+              className="btn-action btn-scan"
+              onClick={openScanner}
+              style={{
+                background: isSeated ? 'linear-gradient(135deg, #059669, #047857)' : undefined
+              }}
             >
-              ❌ 티켓 취소
+              {isSeated ? '✅ 착석 완료됨 (필요시 QR 재스캔)' : '📷 좌석 QR 찍고 착석하기 (LED 점등)'}
             </button>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+              <button className="btn-secondary" onClick={() => setIsQrListOpen(true)}>
+                🖨️ QR 코드 보기
+              </button>
+              <button
+                className="btn-secondary"
+                onClick={handleCancelTicket}
+                style={{ color: '#ef4444', borderColor: 'rgba(239, 68, 68, 0.4)' }}
+              >
+                ❌ 티켓 취소
+              </button>
+            </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* Bottom Reservation Button */}
       {!myTicket && activeTab === 'book' && (
