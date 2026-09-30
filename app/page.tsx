@@ -81,8 +81,8 @@ export default function CinemaSeatPage() {
   const [activeTab, setActiveTab] = useState<'book' | 'current'>('book');
 
   const [selectedSeat, setSelectedSeat] = useState<string | null>(null);
-  const [buyerName, setBuyerName] = useState('홍길동');
-  const [buyerPhone, setBuyerPhone] = useState('010-1234-5678');
+  const [buyerName, setBuyerName] = useState('');
+  const [buyerPhone, setBuyerPhone] = useState('');
 
   // 회차별 티켓 맵 (Key: sessionLabel, 예: "13:10 ~ 13:15", "13:15 ~ 13:20")
   const [tickets, setTickets] = useState<Record<string, TicketData>>({});
@@ -129,6 +129,14 @@ export default function CinemaSeatPage() {
           }
         }
         setTickets(validTickets);
+      }
+
+      // 기기별 저장된 사용자 프로필 불러오기
+      const savedProfile = localStorage.getItem('cine_seat_user_profile');
+      if (savedProfile) {
+        const { name, phone } = JSON.parse(savedProfile);
+        if (name) setBuyerName(name);
+        if (phone) setBuyerPhone(phone);
       }
     } catch {}
   }, []);
@@ -238,7 +246,21 @@ export default function CinemaSeatPage() {
 
   // 5. 다음 회차 0원 예매 진행
   async function handleReserve() {
-    if (!selectedSeat) return;
+    if (!selectedSeat) {
+      alert('예매하실 좌석을 먼저 선택해 주세요.');
+      return;
+    }
+    const trimmedName = buyerName.trim();
+    const trimmedPhone = buyerPhone.trim();
+    if (!trimmedName) {
+      alert('예매자 성명을 입력해 주세요.');
+      return;
+    }
+    if (!trimmedPhone) {
+      alert('휴대폰 번호를 입력해 주세요.');
+      return;
+    }
+
     setIsReserving(true);
 
     try {
@@ -247,13 +269,18 @@ export default function CinemaSeatPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           seat: selectedSeat,
-          name: buyerName.trim() || '홍길동',
-          phone: buyerPhone.trim() || '010-1234-5678'
+          name: trimmedName,
+          phone: trimmedPhone
         })
       });
 
       const data = await res.json();
       if (data.success) {
+        // 해당 기기에 프로필 저장 (다음 번 예매 시 자동 입력)
+        try {
+          localStorage.setItem('cine_seat_user_profile', JSON.stringify({ name: trimmedName, phone: trimmedPhone }));
+        } catch {}
+
         const newTicket: TicketData = {
           seatId: data.seatId,
           token: data.token,
@@ -698,7 +725,7 @@ export default function CinemaSeatPage() {
                 type="text"
                 value={buyerName}
                 onChange={(e) => setBuyerName(e.target.value)}
-                placeholder="홍길동"
+                placeholder="예: 홍길동"
               />
             </div>
             <div className="input-group">
@@ -707,7 +734,7 @@ export default function CinemaSeatPage() {
                 type="tel"
                 value={buyerPhone}
                 onChange={(e) => setBuyerPhone(e.target.value)}
-                placeholder="010-1234-5678"
+                placeholder="예: 010-1234-5678"
               />
             </div>
           </div>
