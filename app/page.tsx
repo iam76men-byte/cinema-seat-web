@@ -45,7 +45,22 @@ export default function CinemaSeatPage() {
   const streamRef = useRef<MediaStream | null>(null);
   const scanAnimRef = useRef<number | null>(null);
 
-  // 1. 좌석 상태 폴링 (1.5초)
+  // 1-1. 브라우저 재접속 시 로컬 저장소(localStorage)에서 티켓 복원
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem('cine_seat_ticket_v1');
+      if (saved) {
+        const parsed: TicketData = JSON.parse(saved);
+        if (parsed.expiresAt > Date.now()) {
+          setMyTicket(parsed);
+        } else {
+          localStorage.removeItem('cine_seat_ticket_v1');
+        }
+      }
+    } catch {}
+  }, []);
+
+  // 1-2. 좌석 상태 폴링 (1.5초)
   const fetchSeats = useCallback(async () => {
     try {
       const res = await fetch('/api/seats');
@@ -77,6 +92,9 @@ export default function CinemaSeatPage() {
 
       if (remSec <= 0) {
         alert('⚠️ 티켓 유효시간(5분)이 만료되어 좌석이 자동 회수되었습니다.');
+        try {
+          localStorage.removeItem('cine_seat_ticket_v1');
+        } catch {}
         setMyTicket(null);
         setSelectedSeat(null);
       }
@@ -120,14 +138,18 @@ export default function CinemaSeatPage() {
 
       const data = await res.json();
       if (data.success) {
-        setMyTicket({
+        const ticketData: TicketData = {
           seatId: data.seatId,
           token: data.token,
           expiresAt: data.expiresAt,
           buyer: data.buyer
-        });
+        };
+        try {
+          localStorage.setItem('cine_seat_ticket_v1', JSON.stringify(ticketData));
+        } catch {}
+        setMyTicket(ticketData);
         setSelectedSeat(null);
-        alert(`🎉 [${data.seatId} 좌석] 0원 예매 완료!\n\n예매자: ${data.buyer.name}\nAES-256-GCM 암호화 티켓이 발급되었습니다.\n5분 이내에 현장 좌석 QR을 스캔해주세요.`);
+        alert(`🎉 [${data.seatId} 좌석] 0원 예매 완료!\n\n예매자: ${data.buyer.name}\nAES-256-GCM 암호화 티켓이 발급되었습니다.\n(브라우저를 닫았다 열어도 5분 동안 티켓이 유지됩니다.)`);
         fetchSeats();
       } else {
         alert(`예매 실패: ${data.message}`);
@@ -137,6 +159,16 @@ export default function CinemaSeatPage() {
     } finally {
       setIsReserving(false);
     }
+  }
+
+  // 4-1. 티켓 취소 / 좌석 반환
+  function handleCancelTicket() {
+    if (!confirm('현재 티켓을 취소하시겠습니까?\n취소 시 브라우저에서 티켓이 삭제되며, 좌석은 만료 시간 또는 리셋 후 다시 예매 가능합니다.')) return;
+    try {
+      localStorage.removeItem('cine_seat_ticket_v1');
+    } catch {}
+    setMyTicket(null);
+    setSelectedSeat(null);
   }
 
   // 5. 좌석 QR 인증 요청
@@ -321,7 +353,9 @@ export default function CinemaSeatPage() {
         <div className="ticket-card">
           <div className="ticket-header">
             <span className="ticket-badge">✨ 모바일 예매권 (0원)</span>
-            <span className="security-badge">🔐 AES-256-GCM 봉인</span>
+            <span className="security-badge" title="브라우저를 닫았다 열어도 5분간 유지됩니다">
+              💾 저장됨 · 🔐 AES-256-GCM
+            </span>
           </div>
 
           <div className="ticket-buyer-row">
@@ -347,9 +381,18 @@ export default function CinemaSeatPage() {
           <button className="btn-action btn-scan" onClick={openScanner}>
             📷 좌석 QR 찍고 잠금 풀기
           </button>
-          <button className="btn-secondary" onClick={() => setIsQrListOpen(true)}>
-            🖨️ 현장 좌석 QR 미리보기 / 원격 테스트
-          </button>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+            <button className="btn-secondary" onClick={() => setIsQrListOpen(true)}>
+              🖨️ QR 코드 보기
+            </button>
+            <button 
+              className="btn-secondary" 
+              onClick={handleCancelTicket}
+              style={{ color: '#ef4444', borderColor: 'rgba(239, 68, 68, 0.4)' }}
+            >
+              ❌ 티켓 취소
+            </button>
+          </div>
         </div>
       )}
 
