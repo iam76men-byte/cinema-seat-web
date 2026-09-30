@@ -436,21 +436,21 @@ export default function CinemaSeatPage() {
           </div>
 
           <div className="screen-curve"></div>
-          <div className="screen-text">SCREEN (다음 회차 예매)</div>
+          <div className="screen-label">SCREEN (다음 회차 예매)</div>
 
-          <div className="seats-grid">
+          <div className="seat-grid">
             {nextSeats.map((s) => {
               const isSelected = selectedSeat === s.id;
               const isBooked = s.status !== 0;
 
-              let btnClass = 'seat-btn';
+              let btnClass = 'seat-btn status-empty';
               let statusLabel = '예매가능';
 
               if (isBooked) {
-                btnClass += ' occupied';
+                btnClass = 'seat-btn status-reserved';
                 statusLabel = s.buyerName ? `${s.buyerName} 예약` : '예약완료';
               } else if (isSelected) {
-                btnClass += ' selected';
+                btnClass = 'seat-btn status-empty selected';
                 statusLabel = '선택됨';
               }
 
@@ -461,15 +461,15 @@ export default function CinemaSeatPage() {
                   onClick={() => handleSelectSeat(s.id)}
                   disabled={isBooked}
                 >
-                  <span className="seat-id">{s.id}</span>
-                  <span className="seat-status">{statusLabel}</span>
+                  <span className="seat-num">{s.id}</span>
+                  <span className="seat-tag">{statusLabel}</span>
                 </button>
               );
             })}
           </div>
 
           {/* Seat Status Legend */}
-          <div className="legend-row">
+          <div className="seat-legend">
             <div className="legend-item">
               <span className="legend-color empty"></span> 빈좌석
             </div>
@@ -496,21 +496,21 @@ export default function CinemaSeatPage() {
           </div>
 
           <div className="screen-curve" style={{ borderColor: 'rgba(16, 185, 129, 0.4)' }}></div>
-          <div className="screen-text" style={{ color: '#10b981' }}>SCREEN (현재 상영 중)</div>
+          <div className="screen-label" style={{ color: '#10b981' }}>SCREEN (현재 상영 중)</div>
 
-          <div className="seats-grid">
+          <div className="seat-grid">
             {currentSeats.map((s) => {
               const isOccupied = s.status === 2;
               const isReserved = s.status === 1;
 
-              let btnClass = 'seat-btn';
-              let statusLabel = '빈좌석 (LED OFF)';
+              let btnClass = 'seat-btn status-empty';
+              let statusLabel = '빈좌석 (소등)';
 
               if (isOccupied) {
-                btnClass += ' occupied';
-                statusLabel = s.buyerName ? `${s.buyerName} (LED ON)` : '관람 중 (LED ON)';
+                btnClass = 'seat-btn status-occupied';
+                statusLabel = s.buyerName ? `${s.buyerName} (점등)` : '관람 중 (LED ON)';
               } else if (isReserved) {
-                btnClass += ' reserved';
+                btnClass = 'seat-btn status-reserved';
                 statusLabel = '입장 대기';
               }
 
@@ -520,10 +520,10 @@ export default function CinemaSeatPage() {
                   className={btnClass}
                   style={{ cursor: 'default' }}
                 >
-                  <span className="seat-id">{s.id}</span>
-                  <span className="seat-status">{statusLabel}</span>
+                  <span className="seat-num">{s.id}</span>
+                  <span className="seat-tag">{statusLabel}</span>
                   {isOccupied && (
-                    <span style={{ fontSize: '10px', color: '#10b981', fontWeight: 700 }}>
+                    <span className="seat-timer">
                       종료: {formatSec(s.remainingSec)}
                     </span>
                   )}
@@ -533,7 +533,7 @@ export default function CinemaSeatPage() {
           </div>
 
           <div style={{
-            marginTop: '12px',
+            marginTop: '16px',
             padding: '10px 14px',
             background: 'rgba(16, 185, 129, 0.1)',
             borderRadius: '10px',
@@ -548,24 +548,27 @@ export default function CinemaSeatPage() {
 
       {/* Buyer Input Form (예매 전) */}
       {!myTicket && activeTab === 'book' && (
-        <div className="buyer-form">
-          <div className="form-group">
-            <label>예매자 성명</label>
-            <input
-              type="text"
-              value={buyerName}
-              onChange={(e) => setBuyerName(e.target.value)}
-              placeholder="홍길동"
-            />
-          </div>
-          <div className="form-group">
-            <label>휴대폰 번호</label>
-            <input
-              type="tel"
-              value={buyerPhone}
-              onChange={(e) => setBuyerPhone(e.target.value)}
-              placeholder="010-1234-5678"
-            />
+        <div className="form-card">
+          <div className="form-title">👤 예매자 정보 입력</div>
+          <div className="input-row">
+            <div className="input-group">
+              <label>예매자 성명</label>
+              <input
+                type="text"
+                value={buyerName}
+                onChange={(e) => setBuyerName(e.target.value)}
+                placeholder="홍길동"
+              />
+            </div>
+            <div className="input-group">
+              <label>휴대폰 번호</label>
+              <input
+                type="tel"
+                value={buyerPhone}
+                onChange={(e) => setBuyerPhone(e.target.value)}
+                placeholder="010-1234-5678"
+              />
+            </div>
           </div>
         </div>
       )}
