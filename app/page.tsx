@@ -37,7 +37,7 @@ interface TicketData {
   };
 }
 
-const STORAGE_KEY = 'cine_seat_ticket_slot_v2';
+const STORAGE_KEY = 'cine_seat_multi_tickets_v4';
 
 export default function CinemaSeatPage() {
   const [currentSlot, setCurrentSlot] = useState<SlotInfo>({
@@ -75,8 +75,9 @@ export default function CinemaSeatPage() {
   const [selectedSeat, setSelectedSeat] = useState<string | null>(null);
   const [buyerName, setBuyerName] = useState('홍길동');
   const [buyerPhone, setBuyerPhone] = useState('010-1234-5678');
-  const [myTicket, setMyTicket] = useState<TicketData | null>(null);
-  const [ticketCountdown, setTicketCountdown] = useState('계산 중...');
+
+  // 회차별 티켓 맵 (Key: sessionLabel, 예: "13:10 ~ 13:15", "13:15 ~ 13:20")
+  const [tickets, setTickets] = useState<Record<string, TicketData>>({});
   const [isReserving, setIsReserving] = useState(false);
 
   // Modals
@@ -90,17 +91,36 @@ export default function CinemaSeatPage() {
   const streamRef = useRef<MediaStream | null>(null);
   const scanAnimRef = useRef<number | null>(null);
 
-  // 1. 브라우저 재접속 시 로컬 저장소(localStorage)에서 티켓 복원
+  // 현재 회차 및 다음 회차 티켓 분리
+  const currentTicket = tickets[currentSlot.label] || null;
+  const nextTicket = tickets[nextSlot.label] || null;
+
+  // 1. 브라우저 재접속 시 로컬 저장소(localStorage)에서 회차별 티켓 복원
   useEffect(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEY);
       if (saved) {
-        const parsed: TicketData = JSON.parse(saved);
-        if (parsed.expiresAt > Date.now()) {
-          setMyTicket(parsed);
-        } else {
-          localStorage.removeItem(STORAGE_KEY);
+        const parsed = JSON.parse(saved);
+        const validTickets: Record<string, TicketData> = {};
+        const now = Date.now();
+
+        if (typeof parsed === 'object' && parsed !== null) {
+          if (parsed.seatId && parsed.expiresAt) {
+            // 단일 티켓 호환
+            if (parsed.expiresAt > now) {
+              validTickets[parsed.sessionLabel || '기존티켓'] = parsed;
+            }
+          } else {
+            // 회차별 맵
+            for (const [k, t] of Object.entries(parsed)) {
+              const item = t as TicketData;
+              if (item && item.expiresAt > now) {
+                validTickets[k] = item;
+              }
+            }
+          }
         }
+        setTickets(validTickets);
       }
     } catch {}
   }, []);
@@ -130,32 +150,30 @@ export default function CinemaSeatPage() {
     return () => clearInterval(interval);
   }, [fetchSeatData]);
 
-  // 3. 내 티켓 일괄 종료 타이머 (해당 회차 종료 시각 기준)
+  // 3. 회차 종료 시 만료된 티켓 자동 소멸 정리
   useEffect(() => {
-    if (!myTicket) return;
-
     const timer = setInterval(() => {
       const now = Date.now();
-      const remMs = myTicket.expiresAt - now;
-      const remSec = Math.floor(remMs / 1000);
-
-      if (remSec <= 0) {
-        alert(`🎬 [${myTicket.sessionLabel}] 상영 회차가 종료되어 모든 좌석이 일괄 소등 및 반환되었습니다.`);
-        try {
-          localStorage.removeItem(STORAGE_KEY);
-        } catch {}
-        setMyTicket(null);
-        setSelectedSeat(null);
-        return;
-      }
-
-      const m = Math.floor(remSec / 60);
-      const s = remSec % 60;
-      setTicketCountdown(`${m < 10 ? '0' : ''}${m}:${s < 10 ? '0' : ''}${s}`);
+      setTickets(prev => {
+        let changed = false;
+        const nextMap = { ...prev };
+        for (const [label, t] of Object.entries(nextMap)) {
+          if (t.expiresAt <= now) {
+            delete nextMap[label];
+            changed = true;
+          }
+        }
+        if (changed) {
+          try {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(nextMap));
+          } catch {}
+        }
+        return changed ? nextMap : prev;
+      });
     }, 1000);
 
     return () => clearInterval(timer);
-  }, [myTicket]);
+  }, []);
 
   function formatSec(sec: number) {
     if (sec < 0) sec = 0;
@@ -164,72 +182,49 @@ export default function CinemaSeatPage() {
     return `${m < 10 ? '0' : ''}${m}:${s < 10 ? '0' : ''}${s}`;
   }
 
-  // 4. 다음 회차 좌석 선택 (기존 티켓 보호 및 안전한 변경)
+  // 4. 다음 회차 좌석 선택 (회차별 티켓 독립 관리)
   async function handleSelectSeat(seatId: string) {
     const s = nextSeats.find(item => item.id === seatId);
 
-    // 4-1. 이미 내 티켓이 있는 경우
-    if (myTicket) {
-      if (myTicket.seatId === seatId) {
-        alert(`이미 예매하신 [${seatId}] 좌석입니다.\n\n하단의 [📷 좌석 QR 찍고 착석하기] 버튼을 눌러 현장 QR 코드를 스캔해주세요.`);
-        return;
-      }
-
-      // 다른 이미 예약/착석된 좌석을 누른 경우
-      if (s && s.status !== 0) {
-        alert(`[${seatId}] 좌석은 이미 다른 관객이 예매한 좌석입니다.`);
+    // 4-1. 이미 다음 회차(nextSlot.label)의 티켓을 가지고 있는 경우
+    if (nextTicket) {
+      if (nextTicket.seatId === seatId) {
+        alert(`이미 다음 회차 [${nextSlot.label}]의 [${seatId}] 좌석을 예매하셨습니다.\n하단의 티켓 카드를 확인해주세요.`);
         return;
       }
 
       // 다른 빈 좌석을 눌러 변경하려는 경우
       const willChange = confirm(
-        `현재 [${myTicket.seatId}] 좌석 티켓을 보유 중입니다.\n\n[${seatId}] 좌석으로 변경하시겠습니까?\n\n※ 확인 시 기존 [${myTicket.seatId}] 좌석은 취소 및 반환되며, 새로운 좌석을 예매하게 됩니다.`
+        `현재 다음 회차 [${nextTicket.seatId}] 좌석 티켓을 보유 중입니다.\n\n[${seatId}] 좌석으로 변경하시겠습니까?\n(확인 시 기존 ${nextTicket.seatId} 좌석은 자동 취소 및 반환됩니다.)`
       );
       if (!willChange) return;
 
-      // 기존 좌석 서버에서 안전하게 반환
-      const oldSeat = myTicket.seatId;
+      // 기존 다음 회차 좌석 서버에서 반환
+      const oldSeat = nextTicket.seatId;
       try {
         await fetch(`/api/release?seat=${oldSeat}`);
-        localStorage.removeItem(STORAGE_KEY);
+        setTickets(prev => {
+          const updated = { ...prev };
+          delete updated[nextSlot.label];
+          try {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+          } catch {}
+          return updated;
+        });
       } catch {}
 
-      setMyTicket(null);
       setSelectedSeat(seatId);
       await fetchSeatData();
       return;
     }
 
-    // 4-2. 티켓이 없는 상태에서 이미 예약된 좌석을 누른 경우 (티켓 복원 지원)
+    // 4-2. 다른 사람이 이미 예매/점유한 좌석인 경우
     if (s && s.status !== 0) {
-      if (s.token) {
-        const willRestore = confirm(
-          `[${seatId}] 좌석은 [${s.buyerName || '예매자'}] 님으로 예약되어 있습니다.\n\n혹시 고객님이 예매하신 좌석인가요?\n확인을 누르시면 모바일 티켓을 이 기기로 다시 불러옵니다.`
-        );
-        if (willRestore) {
-          const restoredTicket: TicketData = {
-            seatId: s.id,
-            token: s.token,
-            sessionLabel: nextSlot.label,
-            expiresAt: nextSlot.slotEnd,
-            buyer: {
-              name: s.buyerName || '예매자',
-              phoneMasked: '010-****-****'
-            }
-          };
-          try {
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(restoredTicket));
-          } catch {}
-          setMyTicket(restoredTicket);
-          setSelectedSeat(null);
-          alert(`🎉 [${s.id}] 좌석의 모바일 티켓이 성공적으로 복원되었습니다!\n이제 [📷 좌석 QR 찍고 착석하기]로 입장이 가능합니다.`);
-          return;
-        }
-      }
       alert(`다음 회차 [${nextSlot.label}]의 ${seatId} 좌석은 이미 다른 관객이 예매했습니다.`);
       return;
     }
 
+    // 4-3. 정상 선택
     setSelectedSeat(seatId);
   }
 
@@ -251,7 +246,7 @@ export default function CinemaSeatPage() {
 
       const data = await res.json();
       if (data.success) {
-        const ticket: TicketData = {
+        const newTicket: TicketData = {
           seatId: data.seatId,
           token: data.token,
           sessionLabel: data.sessionLabel,
@@ -259,13 +254,16 @@ export default function CinemaSeatPage() {
           buyer: data.buyer
         };
 
-        try {
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(ticket));
-        } catch {}
+        setTickets(prev => {
+          const updated = { ...prev, [newTicket.sessionLabel]: newTicket };
+          try {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+          } catch {}
+          return updated;
+        });
 
-        setMyTicket(ticket);
         setSelectedSeat(null);
-        alert(`🎉 [${data.sessionLabel} 회차] ${data.seatId} 좌석 예매 완료!\n\n예매자: ${data.buyer.name}\n회차 종료 시각에 모든 좌석이 한꺼번에 일괄 종료됩니다.\n(브라우저를 닫았다 열어도 유지됩니다)`);
+        alert(`🎉 [${data.sessionLabel} 회차] ${data.seatId} 좌석 예매 완료!\n\n예매자: ${data.buyer.name}\n회차 종료 시각에 모든 좌석이 한꺼번에 일괄 종료됩니다.`);
         fetchSeatData();
       } else {
         alert(`예매 실패: ${data.message}`);
@@ -277,19 +275,24 @@ export default function CinemaSeatPage() {
     }
   }
 
-  // 6. 티켓 취소 (서버 DB 좌석 정상 반환 연동)
-  async function handleCancelTicket() {
-    if (!myTicket) return;
-    const targetSeat = myTicket.seatId;
+  // 6. 특정 회차 티켓 취소 (서버 DB 좌석 정상 반환 연동)
+  async function handleCancelTicket(ticketToCancel: TicketData) {
+    if (!ticketToCancel) return;
+    const targetSeat = ticketToCancel.seatId;
+    const targetSession = ticketToCancel.sessionLabel;
 
-    if (!confirm(`현재 예매하신 [${targetSeat}] 좌석 티켓을 취소하시겠습니까?\n\n취소 시 좌석이 즉시 반환되어 다른 관객이 예매할 수 있게 됩니다.`)) {
+    if (!confirm(`[${targetSession}] 회차의 [${targetSeat}] 좌석 티켓을 취소하시겠습니까?\n\n취소 시 좌석이 즉시 반환되어 다시 예매할 수 있게 됩니다.`)) {
       return;
     }
 
-    try {
-      localStorage.removeItem(STORAGE_KEY);
-    } catch {}
-    setMyTicket(null);
+    setTickets(prev => {
+      const updated = { ...prev };
+      delete updated[targetSession];
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+      } catch {}
+      return updated;
+    });
     setSelectedSeat(null);
 
     // 서버에 좌석 반환 요청
@@ -301,24 +304,29 @@ export default function CinemaSeatPage() {
     fetchSeatData();
   }
 
-  // 7. 좌석 QR 인증 요청
+  // 7. 좌석 QR 인증 요청 (현장 스캔)
   const verifySeat = useCallback(async (scannedSeat: string) => {
-    if (!myTicket) return;
+    // 현재 상영 중 티켓 우선, 없으면 다음 회차 티켓
+    const targetTicket = currentTicket || nextTicket;
+    if (!targetTicket) {
+      alert('보유 중인 유효한 티켓이 없습니다.');
+      return;
+    }
 
     try {
       const res = await fetch('/api/verify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          seat: myTicket.seatId,
-          token: myTicket.token,
+          seat: targetTicket.seatId,
+          token: targetTicket.token,
           code: scannedSeat
         })
       });
 
       const data = await res.json();
       if (data.success) {
-        alert(`✅ [${myTicket.seatId}] 좌석 인증 완료!\n\n${data.buyer.name} 님의 본인 확인 및 암호 검증 완료.\n상영 회차 동안 보드 LED가 점등됩니다.`);
+        alert(`✅ [${targetTicket.seatId}] 좌석 인증 완료!\n\n${data.buyer.name} 님의 본인 확인 및 암호 검증 완료.\n상영 회차 동안 보드 LED가 점등됩니다.`);
         fetchSeatData();
       } else {
         alert(`❌ 인증 실패: ${data.message}`);
@@ -326,7 +334,7 @@ export default function CinemaSeatPage() {
     } catch {
       alert('서버 응답 오류 발생');
     }
-  }, [myTicket, fetchSeatData]);
+  }, [currentTicket, nextTicket, fetchSeatData]);
 
   // 8. 카메라 QR 스캐너 제어
   const closeScanner = useCallback(() => {
@@ -366,7 +374,11 @@ export default function CinemaSeatPage() {
   }, [closeScanner, verifySeat]);
 
   async function openScanner() {
-    if (!myTicket) return;
+    const targetTicket = currentTicket || nextTicket;
+    if (!targetTicket) {
+      alert('예매하신 티켓이 없습니다.');
+      return;
+    }
     setIsScannerOpen(true);
     setScannerStatus('카메라 준비 중...');
 
@@ -387,12 +399,16 @@ export default function CinemaSeatPage() {
 
   function handleDirectVerify(seatId: string) {
     setIsQrListOpen(false);
-    if (!myTicket) {
+    const targetTicket = currentTicket || nextTicket;
+    if (!targetTicket) {
       alert(`먼저 [${seatId}] 좌석을 0원에 예매한 후 인증을 진행해 주세요.`);
       return;
     }
     verifySeat(seatId);
   }
+
+  // 화면에 렌더링할 티켓 결정 (현재 탭 기준)
+  const displayedTicket = activeTab === 'current' ? (currentTicket || nextTicket) : (nextTicket || currentTicket);
 
   return (
     <div className="app-container">
@@ -426,6 +442,7 @@ export default function CinemaSeatPage() {
         }}>
           <div style={{ fontSize: '11px', color: '#10b981', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '4px' }}>
             <span>🎬 현재 상영 중</span>
+            {currentTicket && <span style={{ background: '#10b981', color: '#000', fontSize: '9px', padding: '1px 5px', borderRadius: '4px', fontWeight: 800 }}>내 티켓</span>}
           </div>
           <div style={{ fontSize: '14px', fontWeight: 800, marginTop: '2px', color: '#fff' }}>
             {currentSlot.label}
@@ -444,6 +461,7 @@ export default function CinemaSeatPage() {
         }}>
           <div style={{ fontSize: '11px', color: '#f59e0b', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '4px' }}>
             <span>🎟️ 다음 예매 대상</span>
+            {nextTicket && <span style={{ background: '#f59e0b', color: '#000', fontSize: '9px', padding: '1px 5px', borderRadius: '4px', fontWeight: 800 }}>예매완료</span>}
           </div>
           <div style={{ fontSize: '14px', fontWeight: 800, marginTop: '2px', color: '#fff' }}>
             {nextSlot.label}
@@ -515,21 +533,21 @@ export default function CinemaSeatPage() {
           <div className="seat-grid">
             {nextSeats.map((s) => {
               const isSelected = selectedSeat === s.id;
-              const isMySeat = myTicket?.seatId === s.id;
+              const isMyNextSeat = nextTicket?.seatId === s.id;
 
               let btnClass = 'seat-btn status-empty';
               let badgeText = '예매 가능';
               let subText = '';
 
               if (s.status === 2) {
-                // 🟢 착석 완료 (현장 QR 인증 완료 & 점유 상태)
+                // 🟢 착석 완료
                 btnClass = 'seat-btn status-occupied';
-                badgeText = isMySeat ? '내 좌석 (착석)' : (s.buyerName ? `${s.buyerName} 착석` : '착석 완료');
+                badgeText = isMyNextSeat ? '내 좌석 (착석)' : (s.buyerName ? `${s.buyerName} 착석` : '착석 완료');
                 subText = '🟢 착석 (LED ON)';
               } else if (s.status === 1) {
-                // 🟡 예약 대기 (0원 예매 완료, 아직 현장 QR 미인증)
+                // 🟡 예약 대기
                 btnClass = 'seat-btn status-reserved';
-                badgeText = isMySeat ? '내 예약 (대기)' : (s.buyerName ? `${s.buyerName} 예약` : '예약 완료');
+                badgeText = isMyNextSeat ? '내 예약 (대기)' : (s.buyerName ? `${s.buyerName} 예약` : '예약 완료');
                 subText = '🟡 입장 대기';
               } else if (isSelected) {
                 btnClass = 'seat-btn status-empty selected';
@@ -537,18 +555,18 @@ export default function CinemaSeatPage() {
                 subText = '예매 진행 중';
               }
 
-              const isClickable = s.status === 0;
+              const isClickable = s.status === 0 || isMyNextSeat;
 
               return (
                 <button
                   key={s.id}
                   className={btnClass}
                   onClick={() => handleSelectSeat(s.id)}
-                  disabled={!isClickable}
+                  disabled={!isClickable && s.status !== 0}
                   style={{
                     position: 'relative',
-                    borderWidth: isMySeat ? '2px' : undefined,
-                    boxShadow: isMySeat ? '0 0 16px rgba(245, 158, 11, 0.5)' : undefined
+                    borderWidth: isMyNextSeat ? '2px' : undefined,
+                    boxShadow: isMyNextSeat ? '0 0 16px rgba(245, 158, 11, 0.5)' : undefined
                   }}
                 >
                   <span className="seat-num">{s.id}</span>
@@ -600,23 +618,28 @@ export default function CinemaSeatPage() {
             {currentSeats.map((s) => {
               const isOccupied = s.status === 2;
               const isReserved = s.status === 1;
+              const isMyCurrSeat = currentTicket?.seatId === s.id;
 
               let btnClass = 'seat-btn status-empty';
               let statusLabel = '빈좌석 (소등)';
 
               if (isOccupied) {
                 btnClass = 'seat-btn status-occupied';
-                statusLabel = s.buyerName ? `${s.buyerName} (점등)` : '관람 중 (LED ON)';
+                statusLabel = isMyCurrSeat ? '내 좌석 (점등)' : (s.buyerName ? `${s.buyerName} (점등)` : '관람 중 (LED ON)');
               } else if (isReserved) {
                 btnClass = 'seat-btn status-reserved';
-                statusLabel = '입장 대기';
+                statusLabel = isMyCurrSeat ? '내 예약 (대기)' : '입장 대기';
               }
 
               return (
                 <button
                   key={s.id}
                   className={btnClass}
-                  style={{ cursor: 'default' }}
+                  style={{
+                    cursor: 'default',
+                    borderWidth: isMyCurrSeat ? '2px' : undefined,
+                    boxShadow: isMyCurrSeat ? '0 0 16px rgba(16, 185, 129, 0.6)' : undefined
+                  }}
                 >
                   <span className="seat-num">{s.id}</span>
                   <span className="seat-tag">{statusLabel}</span>
@@ -656,8 +679,8 @@ export default function CinemaSeatPage() {
         </div>
       )}
 
-      {/* Buyer Input Form (예매 전) */}
-      {!myTicket && activeTab === 'book' && (
+      {/* Buyer Input Form (다음 회차 예매 티켓이 없을 때 표시) */}
+      {!nextTicket && activeTab === 'book' && (
         <div className="form-card">
           <div className="form-title">👤 예매자 정보 입력</div>
           <div className="input-row">
@@ -683,15 +706,21 @@ export default function CinemaSeatPage() {
         </div>
       )}
 
-      {/* My Ticket View (내 티켓 카드) */}
-      {myTicket && (() => {
-        const mySeatObj = nextSeats.find(s => s.id === myTicket.seatId) || currentSeats.find(s => s.id === myTicket.seatId);
+      {/* My Ticket View (해당 탭에 맞는 티켓 표시) */}
+      {displayedTicket && (() => {
+        const isCurrentSessionTicket = displayedTicket.sessionLabel === currentSlot.label;
+        const matchingSeats = isCurrentSessionTicket ? currentSeats : nextSeats;
+        const mySeatObj = matchingSeats.find(s => s.id === displayedTicket.seatId);
         const isSeated = mySeatObj?.status === 2;
+        const remainingMs = Math.max(0, displayedTicket.expiresAt - Date.now());
+        const remainingSec = Math.floor(remainingMs / 1000);
 
         return (
           <div className="ticket-card">
             <div className="ticket-header">
-              <span className="ticket-badge">✨ [{myTicket.sessionLabel}] 모바일 티켓</span>
+              <span className="ticket-badge">
+                {isCurrentSessionTicket ? '🎬 [현재 상영 중 티켓]' : '✨ [다음 회차 예매 티켓]'}
+              </span>
               <span className="security-badge" title="브라우저를 닫았다 열어도 상영 종료 시까지 유지됩니다">
                 💾 저장됨 · 🔐 AES-256
               </span>
@@ -715,22 +744,22 @@ export default function CinemaSeatPage() {
                 {isSeated ? '🟢 현장 좌석 착석 완료 (LED 점등)' : '🟡 예약 대기 중 (현장 QR 미인증)'}
               </span>
               <span style={{ fontSize: '11px', opacity: 0.8 }}>
-                {isSeated ? '잠금 해제됨' : '좌석 QR을 찍어주세요'}
+                {displayedTicket.sessionLabel}
               </span>
             </div>
 
             <div className="ticket-buyer-row">
-              <div><b>예매자:</b> {myTicket.buyer.name}</div>
-              <div><b>연락처:</b> {myTicket.buyer.phoneMasked}</div>
+              <div><b>예매자:</b> {displayedTicket.buyer.name}</div>
+              <div><b>연락처:</b> {displayedTicket.buyer.phoneMasked}</div>
             </div>
 
             <div className="ticket-body">
               <div className="ticket-seat-box">
                 <div className="lbl">내 예매 좌석</div>
-                <div className="val">{myTicket.seatId}</div>
+                <div className="val">{displayedTicket.seatId}</div>
               </div>
               <div className="ticket-time-box">
-                <div className="countdown-timer">{ticketCountdown}</div>
+                <div className="countdown-timer">{formatSec(remainingSec)}</div>
                 <div className="countdown-lbl">회차 종료 시 일괄 자동 소멸</div>
               </div>
             </div>
@@ -750,7 +779,7 @@ export default function CinemaSeatPage() {
               </button>
               <button
                 className="btn-secondary"
-                onClick={handleCancelTicket}
+                onClick={() => handleCancelTicket(displayedTicket)}
                 style={{ color: '#ef4444', borderColor: 'rgba(239, 68, 68, 0.4)' }}
               >
                 ❌ 티켓 취소
@@ -760,8 +789,8 @@ export default function CinemaSeatPage() {
         );
       })()}
 
-      {/* Bottom Reservation Button */}
-      {!myTicket && activeTab === 'book' && (
+      {/* Bottom Reservation Button (다음 회차 예매 탭에서 다음 티켓이 없을 때) */}
+      {!nextTicket && activeTab === 'book' && (
         <div>
           <button
             className="btn-action"
