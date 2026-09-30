@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyAndDecryptTicket } from '@/lib/crypto';
-import { getSeatsSummary, verifySeat, releaseSeats } from '@/lib/seatStore';
+import { getSeatsSummary, verifySeat, releaseSeats, ALL_SEAT_IDS } from '@/lib/seatStore';
 
 export const dynamic = 'force-dynamic';
 
@@ -23,7 +23,7 @@ export async function POST(req: NextRequest) {
 }
 
 async function handleVerify(seatId: string | null, token: string | null, code: string | null) {
-  if (!seatId || !['A1', 'A2', 'B1', 'B2'].includes(seatId)) {
+  if (!seatId || !(ALL_SEAT_IDS as readonly string[]).includes(seatId)) {
     return NextResponse.json({ success: false, message: '존재하지 않는 좌석입니다.' }, { status: 404 });
   }
 

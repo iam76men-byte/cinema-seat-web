@@ -2,8 +2,11 @@ import { BuyerInfo } from './crypto';
 import { supabase } from './supabase';
 import { SLOT_MS, getSlotsSummary } from './slotManager';
 
+export const ALL_SEAT_IDS = ['A1', 'A2', 'A3', 'A4', 'B1', 'B2', 'B3', 'B4'] as const;
+export type SeatId = typeof ALL_SEAT_IDS[number];
+
 export interface SeatItem {
-  id: string; // 'A1', 'A2', 'B1', 'B2'
+  id: string; // 'A1'~'A4', 'B1'~'B4'
   status: number; // 0=EMPTY, 1=RESERVED, 2=OCCUPIED
   token: string | null;
   buyer: BuyerInfo | null;
@@ -16,12 +19,13 @@ interface MemorySlotState {
   nextSeats: Record<string, SeatItem>;
 }
 
-const initialSeats = (): Record<string, SeatItem> => ({
-  A1: { id: 'A1', status: 0, token: null, buyer: null },
-  A2: { id: 'A2', status: 0, token: null, buyer: null },
-  B1: { id: 'B1', status: 0, token: null, buyer: null },
-  B2: { id: 'B2', status: 0, token: null, buyer: null },
-});
+const initialSeats = (): Record<string, SeatItem> => {
+  const result: Record<string, SeatItem> = {};
+  for (const id of ALL_SEAT_IDS) {
+    result[id] = { id, status: 0, token: null, buyer: null };
+  }
+  return result;
+};
 
 const memoryState: MemorySlotState = {
   currentSlotStart: Math.floor(Date.now() / SLOT_MS) * SLOT_MS,
@@ -83,7 +87,7 @@ async function rolloverDatabaseIfNeeded(now: number) {
 
     if (elapsedSlots >= 2 || dbSlotStart === 0) {
       // 10분 이상 지났거나 최초 초기화: 모두 리셋
-      const seatIds = ['A1', 'A2', 'B1', 'B2'];
+      const seatIds = ALL_SEAT_IDS;
       const updates = [];
 
       for (const s of seatIds) {
@@ -128,7 +132,7 @@ async function rolloverDatabaseIfNeeded(now: number) {
         .select('*')
         .like('id', 'NEXT_%');
 
-      const seatIds = ['A1', 'A2', 'B1', 'B2'];
+      const seatIds = ALL_SEAT_IDS;
       const updates = [];
 
       for (const s of seatIds) {
@@ -202,7 +206,7 @@ export async function getSeatsSummary() {
       return getMemorySummary(slots);
     }
 
-    const seatIds = ['A1', 'A2', 'B1', 'B2'];
+    const seatIds = ALL_SEAT_IDS;
 
     // 현재 상영 좌석
     const currentSeats = seatIds.map(s => {
@@ -245,7 +249,7 @@ export async function getSeatsSummary() {
 }
 
 function getMemorySummary(slots: ReturnType<typeof getSlotsSummary>) {
-  const seatIds = ['A1', 'A2', 'B1', 'B2'];
+  const seatIds = ALL_SEAT_IDS;
   const currentSeats = seatIds.map(s => {
     const seat = memoryState.currentSeats[s] || { id: s, status: 0, buyer: null, token: null };
     return {
@@ -372,7 +376,7 @@ export async function releaseSeats(seatId?: string | null) {
   }
 
   try {
-    const seatIds = ['A1', 'A2', 'B1', 'B2'];
+    const seatIds = ALL_SEAT_IDS;
     const updates = [];
 
     for (const s of seatIds) {

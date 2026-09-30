@@ -24,12 +24,16 @@ FOR ALL
 USING (true) 
 WITH CHECK (true);
 
--- 3. 초기 4개 좌석 레코드 등록 (중복 방지)
+-- 3. 초기 8개 좌석 레코드 등록 (중복 방지)
 INSERT INTO public.cinema_seats (id, status, timer_start, duration_ms)
 VALUES 
   ('A1', 0, 0, 300000),
   ('A2', 0, 0, 300000),
+  ('A3', 0, 0, 300000),
+  ('A4', 0, 0, 300000),
   ('B1', 0, 0, 300000),
-  ('B2', 0, 0, 300000)
+  ('B2', 0, 0, 300000),
+  ('B3', 0, 0, 300000),
+  ('B4', 0, 0, 300000)
 ON CONFLICT (id) DO UPDATE 
 SET status = 0, token = NULL, buyer_name = NULL, buyer_phone = NULL, timer_start = 0;

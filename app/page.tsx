@@ -58,15 +58,23 @@ export default function CinemaSeatPage() {
   const [currentSeats, setCurrentSeats] = useState<SeatData[]>([
     { id: 'A1', status: 0, led: 0, remainingSec: 0, buyerName: null },
     { id: 'A2', status: 0, led: 0, remainingSec: 0, buyerName: null },
+    { id: 'A3', status: 0, led: 0, remainingSec: 0, buyerName: null },
+    { id: 'A4', status: 0, led: 0, remainingSec: 0, buyerName: null },
     { id: 'B1', status: 0, led: 0, remainingSec: 0, buyerName: null },
     { id: 'B2', status: 0, led: 0, remainingSec: 0, buyerName: null },
+    { id: 'B3', status: 0, led: 0, remainingSec: 0, buyerName: null },
+    { id: 'B4', status: 0, led: 0, remainingSec: 0, buyerName: null },
   ]);
 
   const [nextSeats, setNextSeats] = useState<SeatData[]>([
     { id: 'A1', status: 0, led: 0, remainingSec: 0, buyerName: null },
     { id: 'A2', status: 0, led: 0, remainingSec: 0, buyerName: null },
+    { id: 'A3', status: 0, led: 0, remainingSec: 0, buyerName: null },
+    { id: 'A4', status: 0, led: 0, remainingSec: 0, buyerName: null },
     { id: 'B1', status: 0, led: 0, remainingSec: 0, buyerName: null },
     { id: 'B2', status: 0, led: 0, remainingSec: 0, buyerName: null },
+    { id: 'B3', status: 0, led: 0, remainingSec: 0, buyerName: null },
+    { id: 'B4', status: 0, led: 0, remainingSec: 0, buyerName: null },
   ]);
 
   // UI 탭: 'book' (다음 회차 예매), 'current' (현재 상영 좌석 현황)
@@ -83,7 +91,7 @@ export default function CinemaSeatPage() {
   // Modals
   const [isScannerOpen, setIsScannerOpen] = useState(false);
   const [isQrListOpen, setIsQrListOpen] = useState(false);
-  const [activeQrSeat, setActiveQrSeat] = useState<'A1' | 'A2' | 'B1' | 'B2'>('A1');
+  const [activeQrSeat, setActiveQrSeat] = useState<string>('A1');
   const [scannerStatus, setScannerStatus] = useState('카메라 준비 중...');
 
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -523,7 +531,7 @@ export default function CinemaSeatPage() {
               [{nextSlot.label}] 상영분 예매
             </span>
             <p style={{ fontSize: '11px', color: 'var(--subtext)', marginTop: '2px' }}>
-              상영 종료 시각({nextSlot.label.split(' ~ ')[1] || '5분 후'})에 ABCD 전체 좌석이 일괄 종료됩니다.
+              상영 종료 시각({nextSlot.label.split(' ~ ')[1] || '5분 후'})에 8개 전체 좌석이 일괄 종료됩니다.
             </p>
           </div>
 
@@ -844,20 +852,21 @@ export default function CinemaSeatPage() {
           </p>
 
           {/* Seat Tab Switcher */}
-          <div style={{ display: 'flex', gap: 6, margin: '14px 0 10px', justifyContent: 'center' }}>
-            {(['A1', 'A2', 'B1', 'B2'] as const).map(seatId => (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 6, margin: '14px 0 10px' }}>
+            {(['A1', 'A2', 'A3', 'A4', 'B1', 'B2', 'B3', 'B4'] as const).map(seatId => (
               <button
                 key={seatId}
                 onClick={() => setActiveQrSeat(seatId)}
                 style={{
-                  padding: '6px 14px',
+                  padding: '8px 4px',
                   borderRadius: '8px',
                   border: activeQrSeat === seatId ? '1px solid var(--accent-gold)' : '1px solid rgba(255,255,255,0.1)',
                   background: activeQrSeat === seatId ? 'rgba(245, 158, 11, 0.2)' : 'rgba(255,255,255,0.05)',
                   color: activeQrSeat === seatId ? 'var(--accent-gold)' : 'var(--text)',
-                  fontSize: 13,
+                  fontSize: 12,
                   fontWeight: 700,
-                  cursor: 'pointer'
+                  cursor: 'pointer',
+                  textAlign: 'center'
                 }}
               >
                 {seatId} 좌석
