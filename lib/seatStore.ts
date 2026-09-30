@@ -358,9 +358,18 @@ export async function releaseSeats(seatId?: string | null) {
   const now = Date.now();
   const currentSlotStart = Math.floor(now / SLOT_MS) * SLOT_MS;
 
-  memoryState.currentSeats = initialSeats();
-  memoryState.nextSeats = initialSeats();
-  memoryState.currentSlotStart = currentSlotStart;
+  if (seatId) {
+    if (memoryState.currentSeats[seatId]) {
+      memoryState.currentSeats[seatId] = { id: seatId, status: 0, token: null, buyer: null };
+    }
+    if (memoryState.nextSeats[seatId]) {
+      memoryState.nextSeats[seatId] = { id: seatId, status: 0, token: null, buyer: null };
+    }
+  } else {
+    memoryState.currentSeats = initialSeats();
+    memoryState.nextSeats = initialSeats();
+    memoryState.currentSlotStart = currentSlotStart;
+  }
 
   try {
     const seatIds = ['A1', 'A2', 'B1', 'B2'];

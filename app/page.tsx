@@ -8,6 +8,7 @@ interface SeatData {
   led: number;
   remainingSec: number;
   buyerName: string | null;
+  token?: string | null;
 }
 
 interface SlotInfo {
@@ -163,13 +164,72 @@ export default function CinemaSeatPage() {
     return `${m < 10 ? '0' : ''}${m}:${s < 10 ? '0' : ''}${s}`;
   }
 
-  // 4. 다음 회차 좌석 선택
-  function handleSelectSeat(seatId: string) {
+  // 4. 다음 회차 좌석 선택 (기존 티켓 보호 및 안전한 변경)
+  async function handleSelectSeat(seatId: string) {
     const s = nextSeats.find(item => item.id === seatId);
+
+    // 4-1. 이미 내 티켓이 있는 경우
+    if (myTicket) {
+      if (myTicket.seatId === seatId) {
+        alert(`이미 예매하신 [${seatId}] 좌석입니다.\n\n하단의 [📷 좌석 QR 찍고 착석하기] 버튼을 눌러 현장 QR 코드를 스캔해주세요.`);
+        return;
+      }
+
+      // 다른 이미 예약/착석된 좌석을 누른 경우
+      if (s && s.status !== 0) {
+        alert(`[${seatId}] 좌석은 이미 다른 관객이 예매한 좌석입니다.`);
+        return;
+      }
+
+      // 다른 빈 좌석을 눌러 변경하려는 경우
+      const willChange = confirm(
+        `현재 [${myTicket.seatId}] 좌석 티켓을 보유 중입니다.\n\n[${seatId}] 좌석으로 변경하시겠습니까?\n\n※ 확인 시 기존 [${myTicket.seatId}] 좌석은 취소 및 반환되며, 새로운 좌석을 예매하게 됩니다.`
+      );
+      if (!willChange) return;
+
+      // 기존 좌석 서버에서 안전하게 반환
+      const oldSeat = myTicket.seatId;
+      try {
+        await fetch(`/api/release?seat=${oldSeat}`);
+        localStorage.removeItem(STORAGE_KEY);
+      } catch {}
+
+      setMyTicket(null);
+      setSelectedSeat(seatId);
+      await fetchSeatData();
+      return;
+    }
+
+    // 4-2. 티켓이 없는 상태에서 이미 예약된 좌석을 누른 경우 (티켓 복원 지원)
     if (s && s.status !== 0) {
+      if (s.token) {
+        const willRestore = confirm(
+          `[${seatId}] 좌석은 [${s.buyerName || '예매자'}] 님으로 예약되어 있습니다.\n\n혹시 고객님이 예매하신 좌석인가요?\n확인을 누르시면 모바일 티켓을 이 기기로 다시 불러옵니다.`
+        );
+        if (willRestore) {
+          const restoredTicket: TicketData = {
+            seatId: s.id,
+            token: s.token,
+            sessionLabel: nextSlot.label,
+            expiresAt: nextSlot.slotEnd,
+            buyer: {
+              name: s.buyerName || '예매자',
+              phoneMasked: '010-****-****'
+            }
+          };
+          try {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(restoredTicket));
+          } catch {}
+          setMyTicket(restoredTicket);
+          setSelectedSeat(null);
+          alert(`🎉 [${s.id}] 좌석의 모바일 티켓이 성공적으로 복원되었습니다!\n이제 [📷 좌석 QR 찍고 착석하기]로 입장이 가능합니다.`);
+          return;
+        }
+      }
       alert(`다음 회차 [${nextSlot.label}]의 ${seatId} 좌석은 이미 다른 관객이 예매했습니다.`);
       return;
     }
+
     setSelectedSeat(seatId);
   }
 
@@ -217,14 +277,28 @@ export default function CinemaSeatPage() {
     }
   }
 
-  // 6. 티켓 취소
-  function handleCancelTicket() {
-    if (!confirm('현재 예매하신 티켓을 취소하시겠습니까?')) return;
+  // 6. 티켓 취소 (서버 DB 좌석 정상 반환 연동)
+  async function handleCancelTicket() {
+    if (!myTicket) return;
+    const targetSeat = myTicket.seatId;
+
+    if (!confirm(`현재 예매하신 [${targetSeat}] 좌석 티켓을 취소하시겠습니까?\n\n취소 시 좌석이 즉시 반환되어 다른 관객이 예매할 수 있게 됩니다.`)) {
+      return;
+    }
+
     try {
       localStorage.removeItem(STORAGE_KEY);
     } catch {}
     setMyTicket(null);
     setSelectedSeat(null);
+
+    // 서버에 좌석 반환 요청
+    try {
+      await fetch(`/api/release?seat=${targetSeat}`);
+    } catch {}
+
+    alert(`[${targetSeat}] 좌석 예매가 취소되었으며, 좌석이 정상적으로 반환되었습니다.`);
+    fetchSeatData();
   }
 
   // 7. 좌석 QR 인증 요청
