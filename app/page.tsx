@@ -5,13 +5,30 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 interface SeatData {
   id: string;
   status: number;
+  led: number;
   remainingSec: number;
   buyerName: string | null;
+}
+
+interface SlotInfo {
+  slotStart: number;
+  slotEnd: number;
+  label: string;
+  remainingSec: number;
+}
+
+interface NextSlotInfo {
+  slotStart: number;
+  slotEnd: number;
+  label: string;
+  remainingSecUntilStart: number;
+  remainingSecUntilEnd: number;
 }
 
 interface TicketData {
   seatId: string;
   token: string;
+  sessionLabel: string;
   expiresAt: number;
   buyer: {
     name: string;
@@ -19,19 +36,46 @@ interface TicketData {
   };
 }
 
+const STORAGE_KEY = 'cine_seat_ticket_slot_v2';
+
 export default function CinemaSeatPage() {
-  const [seats, setSeats] = useState<SeatData[]>([
-    { id: 'A1', status: 0, remainingSec: 0, buyerName: null },
-    { id: 'A2', status: 0, remainingSec: 0, buyerName: null },
-    { id: 'B1', status: 0, remainingSec: 0, buyerName: null },
-    { id: 'B2', status: 0, remainingSec: 0, buyerName: null },
+  const [currentSlot, setCurrentSlot] = useState<SlotInfo>({
+    slotStart: 0,
+    slotEnd: 0,
+    label: '현재 상영 계산 중...',
+    remainingSec: 0
+  });
+
+  const [nextSlot, setNextSlot] = useState<NextSlotInfo>({
+    slotStart: 0,
+    slotEnd: 0,
+    label: '다음 회차 계산 중...',
+    remainingSecUntilStart: 0,
+    remainingSecUntilEnd: 0
+  });
+
+  const [currentSeats, setCurrentSeats] = useState<SeatData[]>([
+    { id: 'A1', status: 0, led: 0, remainingSec: 0, buyerName: null },
+    { id: 'A2', status: 0, led: 0, remainingSec: 0, buyerName: null },
+    { id: 'B1', status: 0, led: 0, remainingSec: 0, buyerName: null },
+    { id: 'B2', status: 0, led: 0, remainingSec: 0, buyerName: null },
   ]);
+
+  const [nextSeats, setNextSeats] = useState<SeatData[]>([
+    { id: 'A1', status: 0, led: 0, remainingSec: 0, buyerName: null },
+    { id: 'A2', status: 0, led: 0, remainingSec: 0, buyerName: null },
+    { id: 'B1', status: 0, led: 0, remainingSec: 0, buyerName: null },
+    { id: 'B2', status: 0, led: 0, remainingSec: 0, buyerName: null },
+  ]);
+
+  // UI 탭: 'book' (다음 회차 예매), 'current' (현재 상영 좌석 현황)
+  const [activeTab, setActiveTab] = useState<'book' | 'current'>('book');
+
   const [selectedSeat, setSelectedSeat] = useState<string | null>(null);
   const [buyerName, setBuyerName] = useState('홍길동');
   const [buyerPhone, setBuyerPhone] = useState('010-1234-5678');
   const [myTicket, setMyTicket] = useState<TicketData | null>(null);
-  const [countdownText, setCountdownText] = useState('05:00');
-  const [progressPercent, setProgressPercent] = useState(100);
+  const [ticketCountdown, setTicketCountdown] = useState('계산 중...');
   const [isReserving, setIsReserving] = useState(false);
 
   // Modals
@@ -45,59 +89,68 @@ export default function CinemaSeatPage() {
   const streamRef = useRef<MediaStream | null>(null);
   const scanAnimRef = useRef<number | null>(null);
 
-  // 1-1. 브라우저 재접속 시 로컬 저장소(localStorage)에서 티켓 복원
+  // 1. 브라우저 재접속 시 로컬 저장소(localStorage)에서 티켓 복원
   useEffect(() => {
     try {
-      const saved = localStorage.getItem('cine_seat_ticket_v1');
+      const saved = localStorage.getItem(STORAGE_KEY);
       if (saved) {
         const parsed: TicketData = JSON.parse(saved);
         if (parsed.expiresAt > Date.now()) {
           setMyTicket(parsed);
         } else {
-          localStorage.removeItem('cine_seat_ticket_v1');
+          localStorage.removeItem(STORAGE_KEY);
         }
       }
     } catch {}
   }, []);
 
-  // 1-2. 좌석 상태 폴링 (1.5초)
-  const fetchSeats = useCallback(async () => {
+  // 2. 서버 좌석 및 슬롯 정보 폴링 (1.2초)
+  const fetchSeatData = useCallback(async () => {
     try {
       const res = await fetch('/api/seats');
       const data = await res.json();
-      if (data.seats) {
-        setSeats(data.seats);
+
+      if (data.slots) {
+        setCurrentSlot(data.slots.current);
+        setNextSlot(data.slots.next);
+      }
+      if (data.currentSeats) {
+        setCurrentSeats(data.currentSeats);
+      }
+      if (data.nextSeats) {
+        setNextSeats(data.nextSeats);
       }
     } catch {}
   }, []);
 
   useEffect(() => {
-    fetchSeats();
-    const interval = setInterval(fetchSeats, 1500);
+    fetchSeatData();
+    const interval = setInterval(fetchSeatData, 1200);
     return () => clearInterval(interval);
-  }, [fetchSeats]);
+  }, [fetchSeatData]);
 
-  // 2. 5분 카운트다운 타이머
+  // 3. 내 티켓 일괄 종료 타이머 (해당 회차 종료 시각 기준)
   useEffect(() => {
     if (!myTicket) return;
 
     const timer = setInterval(() => {
-      const remMs = Math.max(0, myTicket.expiresAt - Date.now());
+      const now = Date.now();
+      const remMs = myTicket.expiresAt - now;
       const remSec = Math.floor(remMs / 1000);
 
-      const m = Math.floor(remSec / 60);
-      const s = remSec % 60;
-      setCountdownText(`${m < 10 ? '0' : ''}${m}:${s < 10 ? '0' : ''}${s}`);
-      setProgressPercent(Math.min(100, (remMs / (5 * 60 * 1000)) * 100));
-
       if (remSec <= 0) {
-        alert('⚠️ 티켓 유효시간(5분)이 만료되어 좌석이 자동 회수되었습니다.');
+        alert(`🎬 [${myTicket.sessionLabel}] 상영 회차가 종료되어 모든 좌석이 일괄 소등 및 반환되었습니다.`);
         try {
-          localStorage.removeItem('cine_seat_ticket_v1');
+          localStorage.removeItem(STORAGE_KEY);
         } catch {}
         setMyTicket(null);
         setSelectedSeat(null);
+        return;
       }
+
+      const m = Math.floor(remSec / 60);
+      const s = remSec % 60;
+      setTicketCountdown(`${m < 10 ? '0' : ''}${m}:${s < 10 ? '0' : ''}${s}`);
     }, 1000);
 
     return () => clearInterval(timer);
@@ -110,17 +163,17 @@ export default function CinemaSeatPage() {
     return `${m < 10 ? '0' : ''}${m}:${s < 10 ? '0' : ''}${s}`;
   }
 
-  // 3. 좌석 클릭 선택
+  // 4. 다음 회차 좌석 선택
   function handleSelectSeat(seatId: string) {
-    const s = seats.find(item => item.id === seatId);
+    const s = nextSeats.find(item => item.id === seatId);
     if (s && s.status !== 0) {
-      alert(`${seatId} 좌석은 이미 예매되었거나 사용 중입니다.`);
+      alert(`다음 회차 [${nextSlot.label}]의 ${seatId} 좌석은 이미 다른 관객이 예매했습니다.`);
       return;
     }
     setSelectedSeat(seatId);
   }
 
-  // 4. 0원 예매 진행
+  // 5. 다음 회차 0원 예매 진행
   async function handleReserve() {
     if (!selectedSeat) return;
     setIsReserving(true);
@@ -138,19 +191,22 @@ export default function CinemaSeatPage() {
 
       const data = await res.json();
       if (data.success) {
-        const ticketData: TicketData = {
+        const ticket: TicketData = {
           seatId: data.seatId,
           token: data.token,
+          sessionLabel: data.sessionLabel,
           expiresAt: data.expiresAt,
           buyer: data.buyer
         };
+
         try {
-          localStorage.setItem('cine_seat_ticket_v1', JSON.stringify(ticketData));
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(ticket));
         } catch {}
-        setMyTicket(ticketData);
+
+        setMyTicket(ticket);
         setSelectedSeat(null);
-        alert(`🎉 [${data.seatId} 좌석] 0원 예매 완료!\n\n예매자: ${data.buyer.name}\nAES-256-GCM 암호화 티켓이 발급되었습니다.\n(브라우저를 닫았다 열어도 5분 동안 티켓이 유지됩니다.)`);
-        fetchSeats();
+        alert(`🎉 [${data.sessionLabel} 회차] ${data.seatId} 좌석 예매 완료!\n\n예매자: ${data.buyer.name}\n회차 종료 시각에 모든 좌석이 한꺼번에 일괄 종료됩니다.\n(브라우저를 닫았다 열어도 유지됩니다)`);
+        fetchSeatData();
       } else {
         alert(`예매 실패: ${data.message}`);
       }
@@ -161,17 +217,17 @@ export default function CinemaSeatPage() {
     }
   }
 
-  // 4-1. 티켓 취소 / 좌석 반환
+  // 6. 티켓 취소
   function handleCancelTicket() {
-    if (!confirm('현재 티켓을 취소하시겠습니까?\n취소 시 브라우저에서 티켓이 삭제되며, 좌석은 만료 시간 또는 리셋 후 다시 예매 가능합니다.')) return;
+    if (!confirm('현재 예매하신 티켓을 취소하시겠습니까?')) return;
     try {
-      localStorage.removeItem('cine_seat_ticket_v1');
+      localStorage.removeItem(STORAGE_KEY);
     } catch {}
     setMyTicket(null);
     setSelectedSeat(null);
   }
 
-  // 5. 좌석 QR 인증 요청
+  // 7. 좌석 QR 인증 요청
   const verifySeat = useCallback(async (scannedSeat: string) => {
     if (!myTicket) return;
 
@@ -188,17 +244,17 @@ export default function CinemaSeatPage() {
 
       const data = await res.json();
       if (data.success) {
-        alert(`✅ [${myTicket.seatId}] 좌석 인증 완료!\n\n${data.buyer.name} 님의 본인 확인 및 암호 검증 완료.\n보드로 잠금 해제 신호가 전달되었습니다 (LED 점등).`);
-        fetchSeats();
+        alert(`✅ [${myTicket.seatId}] 좌석 인증 완료!\n\n${data.buyer.name} 님의 본인 확인 및 암호 검증 완료.\n상영 회차 동안 보드 LED가 점등됩니다.`);
+        fetchSeatData();
       } else {
         alert(`❌ 인증 실패: ${data.message}`);
       }
     } catch {
       alert('서버 응답 오류 발생');
     }
-  }, [myTicket, fetchSeats]);
+  }, [myTicket, fetchSeatData]);
 
-  // 6. 카메라 QR 스캐너 제어
+  // 8. 카메라 QR 스캐너 제어
   const closeScanner = useCallback(() => {
     if (scanAnimRef.current) cancelAnimationFrame(scanAnimRef.current);
     if (streamRef.current) {
@@ -270,91 +326,257 @@ export default function CinemaSeatPage() {
       <div className="header">
         <div className="logo-box">
           <h1>🎟️ CINE-SEAT</h1>
-          <p>인터넷 클라우드 서버 (Vercel 배포판)</p>
+          <p>5분 상영관 자동화 시스템 (일괄 종료 연동)</p>
         </div>
         <div className="badge badge-cloud">
-          <span className="dot"></span> 실시간 클라우드
+          <span className="dot"></span> ESP32 보드 연동
         </div>
       </div>
 
-      {/* Screen & Seat Grid */}
-      <div className="screen-section">
-        <div className="screen-curve"></div>
-        <div className="screen-label">SCREEN</div>
-
-        <div className="seat-grid">
-          {seats.map(s => {
-            const isSelected = selectedSeat === s.id;
-            let statusClass = 'status-empty';
-            let tagText = '예매 가능';
-
-            if (s.status === 1) {
-              statusClass = 'status-reserved';
-              tagText = s.buyerName ? `[${s.buyerName}] 대기` : '5분 대기';
-            } else if (s.status === 2) {
-              statusClass = 'status-occupied';
-              tagText = '점유 (LED ON)';
-            }
-
-            return (
-              <button
-                key={s.id}
-                id={`btn-seat-${s.id}`}
-                className={`seat-btn ${statusClass}`}
-                style={isSelected ? { outline: '3px solid #f59e0b' } : {}}
-                onClick={() => handleSelectSeat(s.id)}
-              >
-                <span className="seat-num">{s.id}</span>
-                <span className="seat-tag">{tagText}</span>
-                {s.status !== 0 && (
-                  <span className="seat-timer">{formatSec(s.remainingSec)}</span>
-                )}
-              </button>
-            );
-          })}
+      {/* 회차 타임라인 카드 */}
+      <div style={{
+        background: 'rgba(22, 28, 45, 0.9)',
+        border: '1px solid rgba(255,255,255,0.1)',
+        borderRadius: '16px',
+        padding: '14px 16px',
+        display: 'grid',
+        gridTemplateColumns: '1fr 1fr',
+        gap: '12px'
+      }}>
+        {/* 현재 상영 회차 */}
+        <div style={{
+          background: 'rgba(16, 185, 129, 0.08)',
+          border: '1px solid rgba(16, 185, 129, 0.3)',
+          borderRadius: '12px',
+          padding: '10px 12px'
+        }}>
+          <div style={{ fontSize: '11px', color: '#10b981', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '4px' }}>
+            <span>🎬 현재 상영 중</span>
+          </div>
+          <div style={{ fontSize: '14px', fontWeight: 800, marginTop: '2px', color: '#fff' }}>
+            {currentSlot.label}
+          </div>
+          <div style={{ fontSize: '11px', color: 'var(--subtext)', marginTop: '4px' }}>
+            종료까지 <b style={{ color: '#10b981' }}>{formatSec(currentSlot.remainingSec)}</b>
+          </div>
         </div>
 
-        <div className="seat-legend">
-          <div className="legend-item"><span className="legend-color" style={{ background: '#334155' }}></span> 빈 좌석</div>
-          <div className="legend-item"><span className="legend-color" style={{ background: '#f59e0b' }}></span> 5분 미사용시 자동회수</div>
-          <div className="legend-item"><span className="legend-color" style={{ background: '#10b981' }}></span> 점유(LED ON)</div>
+        {/* 다음 예매 회차 */}
+        <div style={{
+          background: 'rgba(245, 158, 11, 0.08)',
+          border: '1px solid rgba(245, 158, 11, 0.3)',
+          borderRadius: '12px',
+          padding: '10px 12px'
+        }}>
+          <div style={{ fontSize: '11px', color: '#f59e0b', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '4px' }}>
+            <span>🎟️ 다음 예매 대상</span>
+          </div>
+          <div style={{ fontSize: '14px', fontWeight: 800, marginTop: '2px', color: '#fff' }}>
+            {nextSlot.label}
+          </div>
+          <div style={{ fontSize: '11px', color: 'var(--subtext)', marginTop: '4px' }}>
+            시작까지 <b style={{ color: '#f59e0b' }}>{formatSec(nextSlot.remainingSecUntilStart)}</b>
+          </div>
         </div>
       </div>
 
-      {/* Buyer Info Input Form */}
-      {!myTicket && (
-        <div className="form-card">
-          <div className="form-title">👤 예매자 정보 (암호화 전송 보호)</div>
-          <div className="input-row">
-            <div className="input-group">
-              <label>이름</label>
-              <input
-                type="text"
-                value={buyerName}
-                onChange={e => setBuyerName(e.target.value)}
-                placeholder="예: 홍길동"
-              />
+      {/* 탭 네비게이션: 다음 회차 예매 vs 현재 상영관 좌석 현황 */}
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: '1fr 1fr',
+        background: 'rgba(15, 23, 42, 0.6)',
+        borderRadius: '12px',
+        padding: '4px',
+        border: '1px solid rgba(255,255,255,0.06)'
+      }}>
+        <button
+          onClick={() => setActiveTab('book')}
+          style={{
+            padding: '10px 0',
+            borderRadius: '8px',
+            border: 'none',
+            fontSize: '13px',
+            fontWeight: 700,
+            cursor: 'pointer',
+            background: activeTab === 'book' ? 'linear-gradient(135deg, #f59e0b, #d97706)' : 'transparent',
+            color: activeTab === 'book' ? '#000' : 'var(--subtext)',
+            transition: 'all 0.2s'
+          }}
+        >
+          🎟️ 다음 회차 좌석 예매
+        </button>
+        <button
+          onClick={() => setActiveTab('current')}
+          style={{
+            padding: '10px 0',
+            borderRadius: '8px',
+            border: 'none',
+            fontSize: '13px',
+            fontWeight: 700,
+            cursor: 'pointer',
+            background: activeTab === 'current' ? 'linear-gradient(135deg, #10b981, #059669)' : 'transparent',
+            color: activeTab === 'current' ? '#000' : 'var(--subtext)',
+            transition: 'all 0.2s'
+          }}
+        >
+          🎬 현재 상영 좌석 (LED)
+        </button>
+      </div>
+
+      {/* TAB 1: 다음 회차 예매 화면 */}
+      {activeTab === 'book' && (
+        <div className="screen-section">
+          <div style={{ textAlign: 'center', marginBottom: '8px' }}>
+            <span style={{ fontSize: '13px', color: 'var(--accent-gold)', fontWeight: 700 }}>
+              [{nextSlot.label}] 상영분 예매
+            </span>
+            <p style={{ fontSize: '11px', color: 'var(--subtext)', marginTop: '2px' }}>
+              상영 종료 시각({nextSlot.label.split(' ~ ')[1] || '5분 후'})에 ABCD 전체 좌석이 일괄 종료됩니다.
+            </p>
+          </div>
+
+          <div className="screen-curve"></div>
+          <div className="screen-text">SCREEN (다음 회차 예매)</div>
+
+          <div className="seats-grid">
+            {nextSeats.map((s) => {
+              const isSelected = selectedSeat === s.id;
+              const isBooked = s.status !== 0;
+
+              let btnClass = 'seat-btn';
+              let statusLabel = '예매가능';
+
+              if (isBooked) {
+                btnClass += ' occupied';
+                statusLabel = s.buyerName ? `${s.buyerName} 예약` : '예약완료';
+              } else if (isSelected) {
+                btnClass += ' selected';
+                statusLabel = '선택됨';
+              }
+
+              return (
+                <button
+                  key={s.id}
+                  className={btnClass}
+                  onClick={() => handleSelectSeat(s.id)}
+                  disabled={isBooked}
+                >
+                  <span className="seat-id">{s.id}</span>
+                  <span className="seat-status">{statusLabel}</span>
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Seat Status Legend */}
+          <div className="legend-row">
+            <div className="legend-item">
+              <span className="legend-color empty"></span> 빈좌석
             </div>
-            <div className="input-group">
-              <label>휴대폰 번호</label>
-              <input
-                type="tel"
-                value={buyerPhone}
-                onChange={e => setBuyerPhone(e.target.value)}
-                placeholder="예: 010-1234-5678"
-              />
+            <div className="legend-item">
+              <span className="legend-color selected"></span> 내 선택
+            </div>
+            <div className="legend-item">
+              <span className="legend-color reserved"></span> 예약됨
             </div>
           </div>
         </div>
       )}
 
-      {/* My Ticket View */}
+      {/* TAB 2: 현재 상영 좌석 현황 화면 (ESP32 현장 LED와 100% 일치) */}
+      {activeTab === 'current' && (
+        <div className="screen-section">
+          <div style={{ textAlign: 'center', marginBottom: '8px' }}>
+            <span style={{ fontSize: '13px', color: '#10b981', fontWeight: 700 }}>
+              [{currentSlot.label}] 실시간 상영관 좌석
+            </span>
+            <p style={{ fontSize: '11px', color: 'var(--subtext)', marginTop: '2px' }}>
+              ESP32 보드의 실제 LED 점등 상태와 100% 동기화 중입니다.
+            </p>
+          </div>
+
+          <div className="screen-curve" style={{ borderColor: 'rgba(16, 185, 129, 0.4)' }}></div>
+          <div className="screen-text" style={{ color: '#10b981' }}>SCREEN (현재 상영 중)</div>
+
+          <div className="seats-grid">
+            {currentSeats.map((s) => {
+              const isOccupied = s.status === 2;
+              const isReserved = s.status === 1;
+
+              let btnClass = 'seat-btn';
+              let statusLabel = '빈좌석 (LED OFF)';
+
+              if (isOccupied) {
+                btnClass += ' occupied';
+                statusLabel = s.buyerName ? `${s.buyerName} (LED ON)` : '관람 중 (LED ON)';
+              } else if (isReserved) {
+                btnClass += ' reserved';
+                statusLabel = '입장 대기';
+              }
+
+              return (
+                <button
+                  key={s.id}
+                  className={btnClass}
+                  style={{ cursor: 'default' }}
+                >
+                  <span className="seat-id">{s.id}</span>
+                  <span className="seat-status">{statusLabel}</span>
+                  {isOccupied && (
+                    <span style={{ fontSize: '10px', color: '#10b981', fontWeight: 700 }}>
+                      종료: {formatSec(s.remainingSec)}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+
+          <div style={{
+            marginTop: '12px',
+            padding: '10px 14px',
+            background: 'rgba(16, 185, 129, 0.1)',
+            borderRadius: '10px',
+            fontSize: '12px',
+            color: '#10b981',
+            textAlign: 'center'
+          }}>
+            ⚡ 회차 종료({currentSlot.label.split(' ~ ')[1] || '정각'}) 시 모든 좌석의 LED가 일제히 소등됩니다.
+          </div>
+        </div>
+      )}
+
+      {/* Buyer Input Form (예매 전) */}
+      {!myTicket && activeTab === 'book' && (
+        <div className="buyer-form">
+          <div className="form-group">
+            <label>예매자 성명</label>
+            <input
+              type="text"
+              value={buyerName}
+              onChange={(e) => setBuyerName(e.target.value)}
+              placeholder="홍길동"
+            />
+          </div>
+          <div className="form-group">
+            <label>휴대폰 번호</label>
+            <input
+              type="tel"
+              value={buyerPhone}
+              onChange={(e) => setBuyerPhone(e.target.value)}
+              placeholder="010-1234-5678"
+            />
+          </div>
+        </div>
+      )}
+
+      {/* My Ticket View (내 티켓 카드) */}
       {myTicket && (
         <div className="ticket-card">
           <div className="ticket-header">
-            <span className="ticket-badge">✨ 모바일 예매권 (0원)</span>
-            <span className="security-badge" title="브라우저를 닫았다 열어도 5분간 유지됩니다">
-              💾 저장됨 · 🔐 AES-256-GCM
+            <span className="ticket-badge">✨ [{myTicket.sessionLabel}] 모바일 티켓</span>
+            <span className="security-badge" title="브라우저를 닫았다 열어도 상영 종료 시까지 유지됩니다">
+              💾 저장됨 · 🔐 AES-256
             </span>
           </div>
 
@@ -365,28 +587,24 @@ export default function CinemaSeatPage() {
 
           <div className="ticket-body">
             <div className="ticket-seat-box">
-              <div className="lbl">내 좌석 번호</div>
+              <div className="lbl">내 예매 좌석</div>
               <div className="val">{myTicket.seatId}</div>
             </div>
             <div className="ticket-time-box">
-              <div className="countdown-timer">{countdownText}</div>
-              <div className="countdown-lbl">5분 내 미인증시 자동 회수</div>
+              <div className="countdown-timer">{ticketCountdown}</div>
+              <div className="countdown-lbl">회차 종료 시 일괄 자동 소멸</div>
             </div>
           </div>
 
-          <div className="progress-track">
-            <div className="progress-bar" style={{ width: `${progressPercent}%` }}></div>
-          </div>
-
           <button className="btn-action btn-scan" onClick={openScanner}>
-            📷 좌석 QR 찍고 잠금 풀기
+            📷 좌석 QR 찍고 잠금 풀기 / 입장 확인
           </button>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
             <button className="btn-secondary" onClick={() => setIsQrListOpen(true)}>
               🖨️ QR 코드 보기
             </button>
-            <button 
-              className="btn-secondary" 
+            <button
+              className="btn-secondary"
               onClick={handleCancelTicket}
               style={{ color: '#ef4444', borderColor: 'rgba(239, 68, 68, 0.4)' }}
             >
@@ -397,7 +615,7 @@ export default function CinemaSeatPage() {
       )}
 
       {/* Bottom Reservation Button */}
-      {!myTicket && (
+      {!myTicket && activeTab === 'book' && (
         <div>
           <button
             className="btn-action"
@@ -408,17 +626,17 @@ export default function CinemaSeatPage() {
             {isReserving
               ? '암호화 티켓 발급 중...'
               : selectedSeat
-              ? `🎟️ [${selectedSeat} 좌석] 0원에 예매하기`
+              ? `🎟️ [${selectedSeat} 좌석] ${nextSlot.label} 0원에 예매하기`
               : '좌석을 선택해 주세요'}
           </button>
           <button className="btn-secondary" onClick={() => setIsQrListOpen(true)}>
-            🔍 좌석 QR 코드 목록 & 원격 인증 테스트
+            🔍 현장 좌석 QR 코드 보기 & 원격 인증
           </button>
         </div>
       )}
 
       <div className="footer">
-        Protected with AES-256-GCM Authenticated Encryption & 5-min Auto Expire
+        5분 고정 회차 타임슬롯 · AES-256-GCM 보안 봉인 · 회차 일괄 종료 연동
       </div>
 
       {/* Modal 1: Camera Scanner */}
@@ -451,51 +669,93 @@ export default function CinemaSeatPage() {
           </p>
 
           {/* Seat Tab Switcher */}
-          <div className="qr-tabs">
+          <div style={{ display: 'flex', gap: 6, margin: '14px 0 10px', justifyContent: 'center' }}>
             {(['A1', 'A2', 'B1', 'B2'] as const).map(seatId => (
               <button
                 key={seatId}
-                className={`qr-tab-btn ${activeQrSeat === seatId ? 'active' : ''}`}
                 onClick={() => setActiveQrSeat(seatId)}
+                style={{
+                  padding: '6px 14px',
+                  borderRadius: '8px',
+                  border: activeQrSeat === seatId ? '1px solid var(--accent-gold)' : '1px solid rgba(255,255,255,0.1)',
+                  background: activeQrSeat === seatId ? 'rgba(245, 158, 11, 0.2)' : 'rgba(255,255,255,0.05)',
+                  color: activeQrSeat === seatId ? 'var(--accent-gold)' : 'var(--text)',
+                  fontSize: 13,
+                  fontWeight: 700,
+                  cursor: 'pointer'
+                }}
               >
-                좌석 {seatId}
+                {seatId} 좌석
               </button>
             ))}
           </div>
 
-          {/* Active Large QR Card */}
-          <div className="qr-single-card">
-            <span style={{ fontSize: 18, fontWeight: 800, color: 'var(--accent-cyan)' }}>
-              좌석 [{activeQrSeat}] 부착용 QR
-            </span>
-
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={`https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=SEAT:${activeQrSeat}`}
-              alt={`대형 QR ${activeQrSeat}`}
-            />
-
-            <div style={{ textAlign: 'center' }}>
-              <div style={{ fontSize: 11, color: 'var(--subtext)', marginBottom: 4 }}>
-                QR 코드 내장 텍스트 데이터:
-              </div>
-              <div className="qr-code-data-badge">
-                SEAT:{activeQrSeat}
-              </div>
+          {/* Active Large QR Display */}
+          <div style={{
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            padding: 16,
+            background: 'rgba(255,255,255,0.03)',
+            borderRadius: 14,
+            border: '1px solid rgba(255,255,255,0.08)'
+          }}>
+            <div style={{
+              background: '#ffffff',
+              padding: 12,
+              borderRadius: 12,
+              boxShadow: '0 8px 25px rgba(0,0,0,0.5)',
+              display: 'inline-block'
+            }}>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=SEAT:${activeQrSeat}`}
+                alt={`${activeQrSeat} QR 코드`}
+                width={200}
+                height={200}
+                style={{ display: 'block' }}
+              />
             </div>
 
-            <div className="qr-btn-group">
-              <button
-                className="btn-action btn-scan"
-                onClick={() => handleDirectVerify(activeQrSeat)}
-              >
-                ⚡ 지금 바로 인증 테스트
-              </button>
+            <div style={{
+              marginTop: 12,
+              fontSize: 18,
+              fontWeight: 800,
+              color: 'var(--accent-gold)',
+              letterSpacing: 1
+            }}>
+              좌석 번호: {activeQrSeat}
             </div>
+
+            <div style={{
+              marginTop: 4,
+              fontSize: 11,
+              color: 'var(--subtext)',
+              fontFamily: 'monospace',
+              background: 'rgba(0,0,0,0.4)',
+              padding: '2px 8px',
+              borderRadius: 4
+            }}>
+              QR 인코딩 내용: SEAT:{activeQrSeat}
+            </div>
+
+            <button
+              className="btn-action"
+              onClick={() => handleDirectVerify(activeQrSeat)}
+              style={{
+                marginTop: 14,
+                padding: '8px 16px',
+                fontSize: 13,
+                background: 'linear-gradient(135deg, #10b981, #059669)',
+                color: '#fff'
+              }}
+            >
+              ⚡ 이 좌석으로 인증 (카메라 없이 즉시 테스트)
+            </button>
           </div>
 
-          <button className="btn-secondary" onClick={() => setIsQrListOpen(false)} style={{ marginTop: 14 }}>
-            닫기
+          <button className="btn-secondary" onClick={() => setIsQrListOpen(false)} style={{ marginTop: 12 }}>
+            창 닫기
           </button>
         </div>
       </div>

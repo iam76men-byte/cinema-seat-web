@@ -21,10 +21,15 @@ export interface TicketPayload {
 
 /**
  * 구매자 정보 및 좌석 정보를 AES-256-GCM으로 암호화하여 토큰 생성
+ * customExpiresAt이 주어지면 해당 슬롯 종료 시각(예: 10:35:00)을 만료 시각으로 사용
  */
-export function createEncryptedTicket(seatId: string, buyerInfo: BuyerInfo): { token: string; payload: TicketPayload } {
+export function createEncryptedTicket(
+  seatId: string, 
+  buyerInfo: BuyerInfo, 
+  customExpiresAt?: number
+): { token: string; payload: TicketPayload } {
   const now = Date.now();
-  const expiresAt = now + TICKET_LIFETIME_MS;
+  const expiresAt = customExpiresAt || (now + TICKET_LIFETIME_MS);
   const nonce = crypto.randomBytes(8).toString('hex');
 
   const payload: TicketPayload = {

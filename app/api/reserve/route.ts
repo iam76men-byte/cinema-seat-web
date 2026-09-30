@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createEncryptedTicket } from '@/lib/crypto';
 import { getSeatsSummary, reserveSeat } from '@/lib/seatStore';
+import { getSlotsSummary } from '@/lib/slotManager';
 
 export const dynamic = 'force-dynamic';
 
@@ -27,17 +28,28 @@ async function handleReserve(seatId: string | null, name: string, phone: string)
     return NextResponse.json({ success: false, message: '존재하지 않는 좌석입니다.' }, { status: 404 });
   }
 
-  const seats = await getSeatsSummary();
-  const currentSeat = seats.find(s => s.id === seatId);
+  const now = Date.now();
+  const slots = getSlotsSummary(now);
+  const summary = await getSeatsSummary();
 
-  if (currentSeat && currentSeat.status !== 0) {
-    return NextResponse.json({ success: false, message: '이미 예매되었거나 사용 중인 좌석입니다.' }, { status: 409 });
+  // 다음 회차 좌석 중 이미 예매된 좌석인지 검사
+  const targetNextSeat = summary.nextSeats.find(s => s.id === seatId);
+  if (targetNextSeat && targetNextSeat.status !== 0) {
+    return NextResponse.json({
+      success: false,
+      message: `다음 회차 [${slots.next.label}]의 ${seatId} 좌석은 이미 예매되었습니다.`
+    }, { status: 409 });
   }
 
-  const { token, payload } = createEncryptedTicket(seatId, { name, phone });
+  // 티켓 생성: 만료 시각은 다음 회차 종료 시각(예: 10:35:00)으로 일괄 고정!
+  const { token, payload } = createEncryptedTicket(
+    seatId,
+    { name, phone },
+    slots.next.slotEnd
+  );
 
-  // Supabase DB에 예매 상태 영구 기록
-  await reserveSeat(seatId, token, payload.buyer);
+  // DB 및 메모리에 다음 회차 예약 기록
+  const reserveResult = await reserveSeat(seatId, token, payload.buyer);
 
   return NextResponse.json({
     success: true,
@@ -48,8 +60,8 @@ async function handleReserve(seatId: string | null, name: string, phone: string)
       name: payload.buyer.name,
       phoneMasked: payload.buyer.phone.replace(/(\d{3})-\d{4}-(\d{4})/, '$1-****-$2')
     },
-    lifetimeSec: 300,
-    expiresAt: payload.expiresAt,
-    message: '0원 예매 완료! 5분 이내에 현장 좌석 QR을 스캔해주세요.'
+    sessionLabel: reserveResult.slotLabel, // 예: "10:30 ~ 10:35"
+    expiresAt: reserveResult.expiresAt,   // 10:35:00 타임스탬프
+    message: `[${reserveResult.slotLabel} 회차] 0원 예매 완료! 상영 종료(${slots.next.label.split(' ~ ')[1]}) 시 전체 일괄 종료됩니다.`
   });
 }
